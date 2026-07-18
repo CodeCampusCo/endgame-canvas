@@ -122,29 +122,42 @@ restart self-heals without touching the canvas (state is in `persistenceKey` sto
 
 Browser side:
 ```
-const bounds = editor.getCurrentPageBounds()          // tight box around all shapes
-// return { empty: true } if no shapes on the page
-const dataUrl = await editor.toImageDataUrl({ bounds, padding, background })
+const shapes = editor.getCurrentPageShapes()
+if (shapes.length === 0) return { empty: true }
+const { url, width, height } = await editor.toImageDataUrl(shapes, {
+  format: 'png', background: true,
+})
 ```
-Server converts the returned data URL into MCP **image content** so the agent sees the
-whole canvas at once — required to resolve all three kill-criterion annotations (scribbled
-text, which shape a circle encloses, what an arrow points at).
+`toImageDataUrl(shapes, opts)` takes an **array of shapes** (not a `{ bounds }` object) and
+computes the bounding box from them, so passing *all* current-page shapes crops tight to the
+content with nothing off-frame — the same net effect the user approved ("crop to all
+shapes, not the viewport"), just via the current API. It returns `{ url, width, height }`;
+`url` is the PNG data URL. Server converts that into MCP **image content** so the agent sees
+the whole canvas at once — required to resolve all three kill-criterion annotations
+(scribbled text, which shape a circle encloses, what an arrow points at).
 
-Exact `toImageDataUrl` options (format/scale/padding/background) are confirmed against
-current tldraw docs (context7) during implementation; the bounds decision — crop to
-`getCurrentPageBounds()`, not the viewport — is fixed here so no shape can fall outside the
-frame.
+`TLImageExportOptions` = `{ format, scale, quality, background, backgroundColor,
+boundingBoxMode, darkMode, ... }` (no `bounds`, no `padding`). We pass `format: 'png'` and
+`background: true`.
 
 ### `get_snapshot` — cheap structured read
 
 ```
 const shapes = editor.getCurrentPageShapes()
-// → summarize: id, type, x, y, w/h, and plain text extracted from props.richText
+const summary = shapes.map((s) => {
+  const b = editor.getShapePageBounds(s)
+  return {
+    id: s.id, type: s.type,
+    x: b?.x, y: b?.y, w: b?.w, h: b?.h,
+    text: editor.getShapeUtil(s).getText(s) ?? '',   // plain text, any shape type
+  }
+})
 ```
-Returns a compact JSON list. **Note:** text lives in `props.richText` (a rich-text object)
-in current tldraw, not a plain `props.text` field — extract plain text from it. Freehand
-`draw` shapes are reported as `type: "draw"` with a point count only; they are *not*
-interpretable structurally (that is the whole reason `read_canvas` exists).
+Returns a compact JSON list. **Note:** use `editor.getShapeUtil(shape).getText(shape)` to
+pull plain text — it works for text shapes and geo labels alike, so we never hand-parse the
+`props.richText` object. Freehand `draw` shapes appear as `type: "draw"` (their `getText`
+is empty); they are *not* interpretable structurally — that is the whole reason
+`read_canvas` exists.
 
 ### `create_shape` — proves the draw-back loop (not a kill gate)
 
@@ -152,12 +165,20 @@ Signature:
 ```
 create_shape({ type: "rectangle" | "ellipse" | "text", x, y, text? }) → { id }
 ```
-Maps to tldraw:
-- `"text"` → `editor.createShape({ type: 'text', x, y, props: { richText: toRichText(text) } })`
-- `"rectangle" | "ellipse"` → `editor.createShape({ type: 'geo', x, y, props: { geo: <type>, richText: toRichText(text ?? '') } })`
-
-Uses `toRichText()` for any label. Returns the created shape `id`. Arrow / connect / frame
-stay deferred per the parent spec.
+Maps to tldraw (`toRichText`, `createShapeId` imported from `tldraw`). Pre-generate the id
+so we return it deterministically:
+```
+const id = createShapeId()
+// text:
+editor.createShape({ id, type: 'text', x, y, props: { richText: toRichText(text ?? '') } })
+// rectangle | ellipse:
+editor.createShape({
+  id, type: 'geo', x, y,
+  props: { geo, w: 200, h: 100, richText: toRichText(text ?? ''),
+           align: 'middle', verticalAlign: 'middle', font: 'draw' },
+})
+```
+Returns `{ id }`. Arrow / connect / frame stay deferred per the parent spec.
 
 ## Registration & the kill test
 
