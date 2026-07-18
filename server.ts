@@ -8,7 +8,11 @@ export function createCanvasClient(relayUrl: string, opts: { timeoutMs?: number 
   const timeoutMs = opts.timeoutMs ?? 10000
   const pending = new Map<string, Pending>()
   const ws = new WebSocket(relayUrl)
-  const ready = new Promise<void>((res) => { ws.onopen = () => res() })
+  const ready = new Promise<void>((resolve, reject) => {
+    ws.onopen = () => resolve()
+    ws.onerror = () => reject(new Error('relay connection failed'))
+  })
+  ready.catch(() => {}) // avoid unhandled-rejection noise when no call is in flight
 
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data as string)

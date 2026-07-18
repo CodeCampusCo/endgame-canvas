@@ -36,3 +36,10 @@ test('silent browser → canvas timeout', async () => {
   await expect(client.call('read_canvas', {})).rejects.toThrow('canvas timeout')
   client.close(); browser.close(); s.stop()
 })
+
+test('relay unreachable → call rejects, does not hang', async () => {
+  // 127.0.0.1:1 — nothing listens; connection fails
+  const client = createCanvasClient('ws://127.0.0.1:1/?role=mcp', { timeoutMs: 2000 })
+  await expect(client.call('read_canvas', {})).rejects.toThrow()
+  client.close()
+})
