@@ -1,4 +1,4 @@
-import { Tldraw, type Editor, type TLShape, toRichText, createShapeId, getArrowBindings } from 'tldraw'
+import { Tldraw, type Editor, type TLShape, type IndexKey, toRichText, createShapeId, getArrowBindings, getIndices } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { createRoot } from 'react-dom/client'
 
@@ -111,6 +111,45 @@ async function runTool(editor: Editor, tool: string, params: any) {
         },
       })
     }
+    return { id }
+  }
+  if (tool === 'create_line') {
+    const { points } = params
+    const origin = points[0]
+    const indices = getIndices(points.length)
+    const pointsDict: Record<string, { id: string; index: IndexKey; x: number; y: number }> = {}
+    points.forEach((p: { x: number; y: number }, i: number) => {
+      const id = `point-${i}`
+      pointsDict[id] = { id, index: indices[i], x: p.x - origin.x, y: p.y - origin.y }
+    })
+    const id = createShapeId()
+    editor.createShape({
+      id,
+      type: 'line',
+      x: origin.x,
+      y: origin.y,
+      props: { points: pointsDict, scale: 1 },
+    })
+    return { id }
+  }
+  if (tool === 'create_highlight') {
+    const { points } = params
+    const origin = points[0]
+    const id = createShapeId()
+    editor.createShape({
+      id,
+      type: 'highlight',
+      x: origin.x,
+      y: origin.y,
+      props: {
+        segments: [
+          { type: 'free', points: points.map((p: { x: number; y: number }) => ({ x: p.x - origin.x, y: p.y - origin.y, z: 0.5 })) },
+        ],
+        isComplete: true,
+        isPen: false,
+        scale: 1,
+      },
+    })
     return { id }
   }
   if (tool === 'create_arrow') {

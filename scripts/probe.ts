@@ -3,11 +3,28 @@ import { createCanvasClient } from '../src/server'
 const client = createCanvasClient('ws://localhost:9910/?role=mcp')
 const cmd = process.argv[2] ?? 'get_snapshot'
 
+// points given as "x,y" pairs, e.g. create-line 400,1350 600,1300 800,1400
+function parsePoints(args: string[]) {
+  return args.map((pair) => {
+    const [x, y] = pair.split(',').map(Number)
+    return { x, y }
+  })
+}
+
 if (cmd === 'create') {
-  const x = Number(process.argv[3] ?? 100)
-  const y = Number(process.argv[4] ?? 100)
-  const text = process.argv[5] ?? 'probe'
-  console.log(await client.call('create_shape', { type: 'rectangle', x, y, text }))
+  const type = process.argv[3] ?? 'rectangle'
+  const x = Number(process.argv[4] ?? 100)
+  const y = Number(process.argv[5] ?? 100)
+  const text = process.argv[6] ?? 'probe'
+  console.log(await client.call('create_shape', { type, x, y, text }))
+} else if (cmd === 'create-line') {
+  const points = parsePoints(process.argv.slice(3))
+  if (points.length < 2) throw new Error('usage: create-line <x,y> <x,y> [x,y...]')
+  console.log(await client.call('create_line', { points }))
+} else if (cmd === 'create-highlight') {
+  const points = parsePoints(process.argv.slice(3))
+  if (points.length < 2) throw new Error('usage: create-highlight <x,y> <x,y> [x,y...]')
+  console.log(await client.call('create_highlight', { points }))
 } else if (cmd === 'read') {
   const r: any = await client.call('read_canvas', {})
   console.log(r.empty ? 'empty' : `png ${r.width}x${r.height}, dataUrl length ${r.url.length}`)
