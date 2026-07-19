@@ -226,6 +226,21 @@ const TOOL_DEFS = [
       required: ['ids'],
     },
   },
+  {
+    name: 'export_image',
+    description:
+      'Export the whole canvas, a named frame, or the current selection to a PNG or SVG file on disk — for embedding diagrams into documents.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', enum: ['canvas', 'frame', 'selection'] },
+        format: { type: 'string', enum: ['png', 'svg'] },
+        path: { type: 'string', description: 'File path to write to (resolved against the server process cwd).' },
+        name: { type: 'string', description: 'Frame name — required only when target is frame.' },
+      },
+      required: ['target', 'format', 'path'],
+    },
+  },
 ]
 
 type ToolContent =
@@ -287,6 +302,13 @@ export function createDispatcher(call: CanvasCall) {
     },
     async select(args) {
       return asText(JSON.stringify(await call('select', args)))
+    },
+    async export_image(args) {
+      const { target, format, path, name } = args
+      const r = await call('export_image', { target, name, format })
+      const base64 = String(r.url).split(',')[1] // strip "data:<mime>;base64,"
+      await Bun.write(path, Buffer.from(base64, 'base64'))
+      return asText(JSON.stringify({ path, width: r.width, height: r.height }))
     },
   }
 

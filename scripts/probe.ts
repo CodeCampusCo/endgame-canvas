@@ -1,4 +1,4 @@
-import { createCanvasClient } from '../src/server'
+import { createCanvasClient, createDispatcher } from '../src/server'
 
 const client = createCanvasClient('ws://localhost:9910/?role=mcp')
 const cmd = process.argv[2] ?? 'get_snapshot'
@@ -75,6 +75,17 @@ if (cmd === 'create') {
 } else if (cmd === 'select') {
   const ids = process.argv.slice(3)
   console.log(await client.call('select', { ids }))
+} else if (cmd === 'export-image') {
+  // usage: export-image <canvas|frame|selection> <png|svg> <path> [frameName]
+  // Goes through the same dispatcher the real MCP server uses, so this
+  // actually performs the decode + Bun.write, not just the browser round-trip.
+  const target = process.argv[3] ?? 'canvas'
+  const format = process.argv[4] ?? 'png'
+  const path = process.argv[5]
+  const name = process.argv[6]
+  if (!path) throw new Error('usage: export-image <canvas|frame|selection> <png|svg> <path> [frameName]')
+  const dispatch = createDispatcher(client.call)
+  console.log(await dispatch('export_image', { target, format, path, name }))
 } else {
   console.log(JSON.stringify(await client.call('get_snapshot', {}), null, 2))
 }

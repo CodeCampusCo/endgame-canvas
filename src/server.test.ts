@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test'
+import { unlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { startRelay } from './relay'
 import { createCanvasClient, createDispatcher } from './server'
+
+function tempPath(ext: string) {
+  return join(tmpdir(), `export-image-test-${crypto.randomUUID()}.${ext}`)
+}
 
 function fakeBrowser(port: number, handler: (req: any) => any): Promise<WebSocket> {
   const ws = new WebSocket(`ws://localhost:${port}/?role=browser`)
@@ -302,4 +309,56 @@ test('dispatch create_highlight → forwards points, returns id as text', async 
     content: [{ type: 'text', text: JSON.stringify({ id: 'shape:hl1' }) }],
   })
   expect(seen).toEqual({ tool: 'create_highlight', params: args })
+})
+
+// --- Family E: export to file (the handler does real I/O — decode + write) ---
+
+test('dispatch export_image → decodes base64 data URL and writes file to disk', async () => {
+  const dispatch = createDispatcher(async () => ({
+    url: 'data:image/png;base64,aGVsbG8=', // base64 of "hello"
+    width: 10,
+    height: 10,
+  }))
+  const path = tempPath('png')
+  try {
+    expect(await dispatch('export_image', { target: 'canvas', format: 'png', path })).toEqual({
+      content: [{ type: 'text', text: JSON.stringify({ path, width: 10, height: 10 }) }],
+    })
+    expect(await Bun.file(path).text()).toBe('hello')
+  } finally {
+    await unlink(path)
+  }
+})
+
+test('dispatch export_image with svg → round-trips svg text through the same decode path', async () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
+  const dispatch = createDispatcher(async () => ({
+    url: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`,
+    width: 20,
+    height: 30,
+  }))
+  const path = tempPath('svg')
+  try {
+    expect(await dispatch('export_image', { target: 'canvas', format: 'svg', path })).toEqual({
+      content: [{ type: 'text', text: JSON.stringify({ path, width: 20, height: 30 }) }],
+    })
+    expect(await Bun.file(path).text()).toBe(svg)
+  } finally {
+    await unlink(path)
+  }
+})
+
+test('dispatch export_image → forwards target/name/format to the canvas call, path stays server-side', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { url: 'data:image/png;base64,aGVsbG8=', width: 10, height: 10 }
+  })
+  const path = tempPath('png')
+  try {
+    await dispatch('export_image', { target: 'frame', name: 'probe-frame', format: 'png', path })
+    expect(seen).toEqual({ tool: 'export_image', params: { target: 'frame', name: 'probe-frame', format: 'png' } })
+  } finally {
+    await unlink(path)
+  }
 })

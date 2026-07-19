@@ -233,6 +233,26 @@ async function runTool(editor: Editor, tool: string, params: any) {
     editor.select(...existing)
     return { selected: editor.getSelectedShapeIds().length }
   }
+  if (tool === 'export_image') {
+    const { target, name, format } = params
+    let shapes: TLShape[]
+    if (target === 'frame') {
+      const frame = findFrame(editor, name)
+      if (!frame) throw new Error('frame not found: ' + name)
+      const children = editor.getCurrentPageShapes().filter((s) => s.parentId === frame.id)
+      shapes = [frame, ...children]
+    } else if (target === 'selection') {
+      const ids = editor.getSelectedShapeIds()
+      if (ids.length === 0) throw new Error('nothing selected')
+      shapes = ids.map((id) => editor.getShape(id)).filter((s): s is TLShape => s != null)
+    } else {
+      shapes = editor.getCurrentPageShapes()
+    }
+    if (shapes.length === 0) throw new Error('nothing to export')
+    const { blob, width, height } = await editor.toImage(shapes, { format, background: true })
+    const url = await blobToDataUrl(blob)
+    return { url, width, height }
+  }
   throw new Error(`unknown tool: ${tool}`)
 }
 
