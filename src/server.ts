@@ -68,6 +68,42 @@ const TOOL_DEFS = [
   },
 ]
 
+type ToolContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string }
+type ToolResult = { content: ToolContent[]; isError?: boolean }
+type CanvasCall = (tool: string, params?: unknown) => Promise<any>
+
+const asText = (t: string): ToolResult => ({ content: [{ type: 'text', text: t }] })
+
+// One entry per tool — adding a tool means adding a handler here, no branching to touch.
+export function createDispatcher(call: CanvasCall) {
+  const handlers: Record<string, (args: any) => Promise<ToolResult>> = {
+    async read_canvas() {
+      const r = await call('read_canvas', {})
+      if (r?.empty) return asText('canvas is empty — nothing drawn yet')
+      const data = String(r.url).split(',')[1] // strip "data:image/png;base64,"
+      return { content: [{ type: 'image', data, mimeType: 'image/png' }] }
+    },
+    async get_snapshot() {
+      return asText(JSON.stringify(await call('get_snapshot', {}), null, 2))
+    },
+    async create_shape(args) {
+      return asText(JSON.stringify(await call('create_shape', args)))
+    },
+  }
+
+  return async (name: string, args: unknown): Promise<ToolResult> => {
+    const handler = handlers[name]
+    if (!handler) return { ...asText(`unknown tool: ${name}`), isError: true }
+    try {
+      return await handler(args ?? {})
+    } catch (e: any) {
+      return { ...asText(String(e?.message ?? e)), isError: true }
+    }
+  }
+}
+
 if (import.meta.main) {
   const client = createCanvasClient('ws://localhost:9910/?role=mcp')
   const server = new Server(
@@ -77,28 +113,10 @@ if (import.meta.main) {
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOL_DEFS }))
 
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const { name, arguments: args } = req.params
-    try {
-      if (name === 'read_canvas') {
-        const r: any = await client.call('read_canvas', {})
-        if (r?.empty) return { content: [{ type: 'text', text: 'canvas is empty — nothing drawn yet' }] }
-        const data = String(r.url).split(',')[1] // strip "data:image/png;base64,"
-        return { content: [{ type: 'image', data, mimeType: 'image/png' }] }
-      }
-      if (name === 'get_snapshot') {
-        const r = await client.call('get_snapshot', {})
-        return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] }
-      }
-      if (name === 'create_shape') {
-        const r = await client.call('create_shape', args)
-        return { content: [{ type: 'text', text: JSON.stringify(r) }] }
-      }
-      return { content: [{ type: 'text', text: `unknown tool: ${name}` }], isError: true }
-    } catch (e: any) {
-      return { content: [{ type: 'text', text: String(e?.message ?? e) }], isError: true }
-    }
-  })
+  const dispatch = createDispatcher(client.call)
+  server.setRequestHandler(CallToolRequestSchema, (req) =>
+    dispatch(req.params.name, req.params.arguments),
+  )
 
   await server.connect(new StdioServerTransport())
   console.error('[server] endgame-canvas MCP ready')
