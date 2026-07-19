@@ -401,3 +401,71 @@ test('dispatch switch_page → forwards name, returns ok as text', async () => {
   })
   expect(seen).toEqual({ tool: 'switch_page', params: args })
 })
+
+// --- Family G: composite flowchart tools ---
+
+test('dispatch create_flowchart → forwards nodes/edges/layout/frame, returns ids+arrowIds as text', async () => {
+  let seen: any
+  const result = {
+    ids: { A: 'shape:a', B: 'shape:b' },
+    arrowIds: ['shape:arrow1'],
+  }
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return result
+  })
+  const args = {
+    nodes: [{ key: 'A', text: 'Start' }, { key: 'B', text: 'End', shape: 'ellipse' }],
+    edges: [{ from: 'A', to: 'B', text: 'flows to' }],
+    layout: 'tree',
+    frame: 'flow1',
+    x: 200,
+    y: 2100,
+  }
+  expect(await dispatch('create_flowchart', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify(result) }],
+  })
+  expect(seen).toEqual({ tool: 'create_flowchart', params: args })
+})
+
+test('dispatch create_flowchart with minimal args → still forwards correctly', async () => {
+  let seen: any
+  const result = { ids: { A: 'shape:a' }, arrowIds: [] }
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return result
+  })
+  const args = { nodes: [{ key: 'A', text: 'Solo' }], edges: [] }
+  expect(await dispatch('create_flowchart', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify(result) }],
+  })
+  expect(seen).toEqual({ tool: 'create_flowchart', params: args })
+})
+
+test('dispatch create_connected → forwards fromId/text/shape/direction, returns nodeId+arrowId as text', async () => {
+  let seen: any
+  const result = { nodeId: 'shape:new1', arrowId: 'shape:arrow2' }
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return result
+  })
+  const args = { fromId: 'shape:a', text: 'Branch', shape: 'ellipse', direction: 'down' }
+  expect(await dispatch('create_connected', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify(result) }],
+  })
+  expect(seen).toEqual({ tool: 'create_connected', params: args })
+})
+
+test('dispatch create_connected with only fromId/text → still forwards correctly', async () => {
+  let seen: any
+  const result = { nodeId: 'shape:new2', arrowId: 'shape:arrow3' }
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return result
+  })
+  const args = { fromId: 'shape:a', text: 'Next' }
+  expect(await dispatch('create_connected', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify(result) }],
+  })
+  expect(seen).toEqual({ tool: 'create_connected', params: args })
+})

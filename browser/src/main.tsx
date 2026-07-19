@@ -1,4 +1,4 @@
-import { Tldraw, type Editor, type TLShape, type IndexKey, toRichText, createShapeId, getArrowBindings, getIndices, PageRecordType } from 'tldraw'
+import { Tldraw, type Editor, type TLShape, type TLShapeId, type IndexKey, toRichText, createShapeId, getArrowBindings, getIndices, PageRecordType } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { createRoot } from 'react-dom/client'
 
@@ -37,6 +37,146 @@ function findFrame(editor: Editor, name: string) {
   return name.startsWith('shape:')
     ? frames.find((s) => s.id === name)
     : frames.find((s) => s.props.name === name)
+}
+
+// Shared by create_arrow and the flowchart/connected tools: create an arrow shape
+// bound at both ends (start→fromShapeId, end→toShapeId) so moving either shape
+// drags the arrow with it.
+function bindArrow(editor: Editor, fromShapeId: TLShapeId, toShapeId: TLShapeId, text?: string) {
+  if (!editor.getShape(fromShapeId)) throw new Error('shape not found: ' + fromShapeId)
+  if (!editor.getShape(toShapeId)) throw new Error('shape not found: ' + toShapeId)
+  const arrowId = createShapeId()
+  const start = editor.getShapePageBounds(fromShapeId)
+  editor.createShape({
+    id: arrowId,
+    type: 'arrow',
+    x: start?.x ?? 0,
+    y: start?.y ?? 0,
+    props: text ? { text } : {},
+  })
+  editor.createBinding({
+    type: 'arrow',
+    fromId: arrowId,
+    toId: fromShapeId,
+    props: { terminal: 'start', normalizedAnchor: { x: 0.5, y: 0.5 }, isPrecise: false, isExact: false },
+  })
+  editor.createBinding({
+    type: 'arrow',
+    fromId: arrowId,
+    toId: toShapeId,
+    props: { terminal: 'end', normalizedAnchor: { x: 0.5, y: 0.5 }, isPrecise: false, isExact: false },
+  })
+  return arrowId
+}
+
+// Shared by create_shape and the flowchart/connected tools: a geo node with
+// centered text, ready to be positioned by the caller.
+function createGeoNode(editor: Editor, geo: string, x: number, y: number, text: string, w: number, h: number): TLShapeId {
+  const id = createShapeId()
+  editor.createShape({
+    id,
+    type: 'geo',
+    x,
+    y,
+    props: {
+      geo,
+      w,
+      h,
+      richText: toRichText(text ?? ''),
+      align: 'middle',
+      verticalAlign: 'middle',
+      font: 'draw',
+    },
+  })
+  return id
+}
+
+const FLOWCHART_NODE_W = 200
+const FLOWCHART_NODE_H = 100
+const FLOWCHART_GAP_X = 80
+const FLOWCHART_GAP_Y = 120
+
+type FlowchartNode = { key: string; text: string; shape?: string }
+type FlowchartEdge = { from: string; to: string; text?: string }
+
+// Layered top-down layout: layer[v] = 1 + max(layer[u]) over incoming edges u->v,
+// roots (indegree 0) at layer 0. Kahn-style topological pass so cycles can't loop
+// forever — any node left unprocessed after the pass lands one layer past the
+// deepest layer we did assign; if there were no roots at all (pure cycle), every
+// node lands at layer 0.
+function treeLayers(nodes: FlowchartNode[], edges: FlowchartEdge[]): Map<string, number> {
+  const indegree = new Map<string, number>(nodes.map((n) => [n.key, 0]))
+  const outgoing = new Map<string, string[]>(nodes.map((n) => [n.key, []]))
+  for (const e of edges) {
+    indegree.set(e.to, (indegree.get(e.to) ?? 0) + 1)
+    outgoing.get(e.from)?.push(e.to)
+  }
+  const layer = new Map<string, number>()
+  let queue = nodes.filter((n) => indegree.get(n.key) === 0).map((n) => n.key)
+  for (const k of queue) layer.set(k, 0)
+  const remaining = new Map(indegree)
+  while (queue.length > 0) {
+    const next: string[] = []
+    for (const u of queue) {
+      for (const v of outgoing.get(u) ?? []) {
+        const candidate = (layer.get(u) ?? 0) + 1
+        layer.set(v, Math.max(layer.get(v) ?? 0, candidate))
+        const left = (remaining.get(v) ?? 0) - 1
+        remaining.set(v, left)
+        if (left === 0) next.push(v)
+      }
+    }
+    queue = next
+  }
+  if (layer.size === 0) {
+    // pure cycle, no roots
+    for (const n of nodes) layer.set(n.key, 0)
+  } else {
+    const maxLayer = Math.max(...layer.values())
+    for (const n of nodes) {
+      if (!layer.has(n.key)) layer.set(n.key, maxLayer + 1)
+    }
+  }
+  return layer
+}
+
+function flowchartPositions(
+  nodes: FlowchartNode[],
+  edges: FlowchartEdge[],
+  layout: string,
+  x: number,
+  y: number,
+): Map<string, { px: number; py: number }> {
+  const positions = new Map<string, { px: number; py: number }>()
+  if (layout === 'grid') {
+    const cols = Math.ceil(Math.sqrt(nodes.length))
+    nodes.forEach((n, i) => {
+      const col = i % cols
+      const row = Math.floor(i / cols)
+      positions.set(n.key, {
+        px: x + col * (FLOWCHART_NODE_W + FLOWCHART_GAP_X),
+        py: y + row * (FLOWCHART_NODE_H + FLOWCHART_GAP_Y),
+      })
+    })
+    return positions
+  }
+  // 'tree' (default): group node keys by layer, preserving nodes[] order within each layer.
+  const layer = treeLayers(nodes, edges)
+  const byLayer = new Map<number, string[]>()
+  for (const n of nodes) {
+    const l = layer.get(n.key)!
+    if (!byLayer.has(l)) byLayer.set(l, [])
+    byLayer.get(l)!.push(n.key)
+  }
+  for (const [l, keys] of byLayer) {
+    keys.forEach((key, j) => {
+      positions.set(key, {
+        px: x + j * (FLOWCHART_NODE_W + FLOWCHART_GAP_X),
+        py: y + l * (FLOWCHART_NODE_H + FLOWCHART_GAP_Y),
+      })
+    })
+  }
+  return positions
 }
 
 async function runTool(editor: Editor, tool: string, params: any) {
@@ -156,30 +296,7 @@ async function runTool(editor: Editor, tool: string, params: any) {
   }
   if (tool === 'create_arrow') {
     const { fromId, toId, text } = params
-    if (!editor.getShape(fromId)) throw new Error('shape not found: ' + fromId)
-    if (!editor.getShape(toId)) throw new Error('shape not found: ' + toId)
-    const arrowId = createShapeId()
-    const start = editor.getShapePageBounds(fromId)
-    editor.createShape({
-      id: arrowId,
-      type: 'arrow',
-      x: start?.x ?? 0,
-      y: start?.y ?? 0,
-      props: text ? { text } : {},
-    })
-    editor.createBinding({
-      type: 'arrow',
-      fromId: arrowId,
-      toId: fromId,
-      props: { terminal: 'start', normalizedAnchor: { x: 0.5, y: 0.5 }, isPrecise: false, isExact: false },
-    })
-    editor.createBinding({
-      type: 'arrow',
-      fromId: arrowId,
-      toId: toId,
-      props: { terminal: 'end', normalizedAnchor: { x: 0.5, y: 0.5 }, isPrecise: false, isExact: false },
-    })
-    return { id: arrowId }
+    return { id: bindArrow(editor, fromId, toId, text) }
   }
   if (tool === 'create_note') {
     const { x, y, text } = params
@@ -272,6 +389,58 @@ async function runTool(editor: Editor, tool: string, params: any) {
     const { blob, width, height } = await editor.toImage(shapes, { format, background: true })
     const url = await blobToDataUrl(blob)
     return { url, width, height }
+  }
+  if (tool === 'create_flowchart') {
+    const { nodes, edges, layout = 'tree', frame, x = 100, y = 100 } = params
+    const positions = flowchartPositions(nodes, edges, layout, x, y)
+
+    if (frame) {
+      let minX = Infinity
+      let minY = Infinity
+      let maxX = -Infinity
+      let maxY = -Infinity
+      for (const { px, py } of positions.values()) {
+        minX = Math.min(minX, px)
+        minY = Math.min(minY, py)
+        maxX = Math.max(maxX, px + FLOWCHART_NODE_W)
+        maxY = Math.max(maxY, py + FLOWCHART_NODE_H)
+      }
+      const pad = 40
+      editor.createShape({
+        id: createShapeId(),
+        type: 'frame',
+        x: minX - pad,
+        y: minY - pad,
+        props: { w: maxX - minX + pad * 2, h: maxY - minY + pad * 2, name: frame },
+      })
+    }
+
+    const ids: Record<string, TLShapeId> = {}
+    for (const node of nodes) {
+      const { px, py } = positions.get(node.key)!
+      ids[node.key] = createGeoNode(editor, node.shape ?? 'rectangle', px, py, node.text, FLOWCHART_NODE_W, FLOWCHART_NODE_H)
+    }
+
+    const arrowIds: string[] = []
+    for (const edge of edges) {
+      if (!(edge.from in ids)) throw new Error('unknown node key in edge: ' + edge.from)
+      if (!(edge.to in ids)) throw new Error('unknown node key in edge: ' + edge.to)
+      arrowIds.push(bindArrow(editor, ids[edge.from], ids[edge.to], edge.text))
+    }
+
+    return { ids, arrowIds }
+  }
+  if (tool === 'create_connected') {
+    const { fromId, text, shape = 'rectangle', direction = 'right' } = params
+    const from = editor.getShape(fromId)
+    if (!from) throw new Error('shape not found: ' + fromId)
+    const b = editor.getShapePageBounds(fromId)!
+    const GAP = 80
+    const nx = direction === 'down' ? b.x : b.x + b.w + GAP
+    const ny = direction === 'down' ? b.y + b.h + GAP : b.y
+    const nodeId = createGeoNode(editor, shape, nx, ny, text, FLOWCHART_NODE_W, FLOWCHART_NODE_H)
+    const arrowId = bindArrow(editor, fromId, nodeId, undefined)
+    return { nodeId, arrowId }
   }
   throw new Error(`unknown tool: ${tool}`)
 }

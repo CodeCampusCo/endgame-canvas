@@ -252,6 +252,60 @@ const TOOL_DEFS = [
     },
   },
   {
+    name: 'create_flowchart',
+    description:
+      'Create a whole flowchart in one step: lay out nodes (tree or grid), create each as a shape, and connect edges with bound arrows. Optionally wraps it all in a named frame.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        nodes: {
+          type: 'array',
+          description: 'Node list — key is the id used by edges, not the resulting shape id.',
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string' },
+              text: { type: 'string' },
+              shape: { type: 'string', description: 'Geo type, default rectangle.' },
+            },
+            required: ['key', 'text'],
+          },
+        },
+        edges: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              from: { type: 'string', description: 'Source node key.' },
+              to: { type: 'string', description: 'Target node key.' },
+              text: { type: 'string', description: 'Optional label on the arrow.' },
+            },
+            required: ['from', 'to'],
+          },
+        },
+        layout: { type: 'string', enum: ['tree', 'grid'], description: "Default 'tree'." },
+        frame: { type: 'string', description: 'Optional frame name to wrap the flowchart in.' },
+        x: { type: 'number', description: 'Layout origin x, default 100.' },
+        y: { type: 'number', description: 'Layout origin y, default 100.' },
+      },
+      required: ['nodes', 'edges'],
+    },
+  },
+  {
+    name: 'create_connected',
+    description: 'Create a new node next to an existing shape and connect it with a bound arrow — extend a flowchart one step at a time.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fromId: { type: 'string', description: 'Shape id to extend from.' },
+        text: { type: 'string' },
+        shape: { type: 'string', description: 'Geo type, default rectangle.' },
+        direction: { type: 'string', enum: ['right', 'down'], description: "Default 'right'." },
+      },
+      required: ['fromId', 'text'],
+    },
+  },
+  {
     name: 'export_image',
     description:
       'Export the whole canvas, a named frame, or the current selection to a PNG or SVG file on disk — for embedding diagrams into documents.',
@@ -336,6 +390,12 @@ export function createDispatcher(call: CanvasCall) {
     },
     async switch_page(args) {
       return asText(JSON.stringify(await call('switch_page', args)))
+    },
+    async create_flowchart(args) {
+      return asText(JSON.stringify(await call('create_flowchart', args)))
+    },
+    async create_connected(args) {
+      return asText(JSON.stringify(await call('create_connected', args)))
     },
     async export_image(args) {
       const { target, format, path, name } = args
