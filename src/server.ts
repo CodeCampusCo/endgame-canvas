@@ -88,6 +88,7 @@ const TOOL_DEFS = [
       properties: {
         points: {
           type: 'array',
+          minItems: 2,
           items: {
             type: 'object',
             properties: { x: { type: 'number' }, y: { type: 'number' } },
@@ -106,6 +107,7 @@ const TOOL_DEFS = [
       properties: {
         points: {
           type: 'array',
+          minItems: 2,
           items: {
             type: 'object',
             properties: { x: { type: 'number' }, y: { type: 'number' } },
