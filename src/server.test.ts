@@ -131,11 +131,12 @@ test('dispatch read_frame with url → image content + shapes/bindings text', as
     height: 300,
     shapes,
     bindings,
+    frameId: 'shape:frame1',
   }))
   expect(await dispatch('read_frame', { name: 'probe-frame' })).toEqual({
     content: [
       { type: 'image', data: 'AAAB', mimeType: 'image/png' },
-      { type: 'text', text: JSON.stringify({ shapes, bindings }, null, 2) },
+      { type: 'text', text: JSON.stringify({ shapes, bindings, frameId: 'shape:frame1' }, null, 2) },
     ],
   })
 })
@@ -147,8 +148,9 @@ test('dispatch read_frame with url: null → text-only content, no image part', 
     height: 0,
     shapes: [],
     bindings: [],
+    frameId: 'shape:empty1',
   }))
   expect(await dispatch('read_frame', { name: 'empty-frame' })).toEqual({
-    content: [{ type: 'text', text: JSON.stringify({ shapes: [], bindings: [] }, null, 2) }],
+    content: [{ type: 'text', text: JSON.stringify({ shapes: [], bindings: [], frameId: 'shape:empty1' }, null, 2) }],
   })
 })
