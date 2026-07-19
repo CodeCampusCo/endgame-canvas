@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "relay": "bun relay.ts",
-    "server": "bun server.ts",
+    "relay": "bun src/relay.ts",
+    "server": "bun src/server.ts",
     "dev": "vite",
     "test": "bun test"
   },

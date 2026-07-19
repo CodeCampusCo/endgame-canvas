@@ -15,8 +15,8 @@ Three processes:
 
 ```
 Terminal 1:  bun run dev        # Vite, serves the browser app (browser/)
-Terminal 2:  bun relay.ts       # WS hub, long-lived — the durable core
-Claude Code ──spawn──► bun server.ts    # stdio MCP + WS client → relay
+Terminal 2:  bun src/relay.ts   # WS hub, long-lived — the durable core
+Claude Code ──spawn──► bun src/server.ts   # stdio MCP + WS client → relay
 
 Browser tab ───────────(WS client, role=browser)──►  relay :9910
 server.ts   ───────────(WS client, role=mcp)─────►  relay :9910
@@ -80,20 +80,25 @@ Single package, no build step on the server side:
 
 ```
 endgame-canvas/
-├── server.ts            # stdio MCP (@modelcontextprotocol/sdk) + WS client → relay
-├── relay.ts             # Bun.serve({ websocket }) hub, role-aware routing
-├── package.json         # deps + scripts
-├── browser/             # Vite + React + tldraw app
+├── src/                 # Bun backend
+│   ├── server.ts        # stdio MCP (@modelcontextprotocol/sdk) + WS client → relay
+│   ├── server.test.ts
+│   ├── relay.ts         # Bun.serve({ websocket }) hub, role-aware routing
+│   └── relay.test.ts
+├── browser/             # Vite + React + tldraw frontend
 │   ├── index.html
-│   ├── vite.config.ts
 │   └── src/
 │       └── main.tsx     # <Tldraw persistenceKey> + onMount → WS client → runs tools on editor
+├── scripts/
+│   └── probe.ts         # drives the browser through the relay (manual verification)
+├── vite.config.ts       # root: 'browser'
+├── package.json         # deps + scripts
 └── docs/specs/...
 ```
 
 Scripts (`package.json`):
-- `relay`  → `bun relay.ts`
-- `server` → `bun server.ts`  (also the command registered with `claude mcp add`)
+- `relay`  → `bun src/relay.ts`
+- `server` → `bun src/server.ts`  (also the command registered with `claude mcp add`)
 - `dev`    → vite dev server for `browser/`
 
 Ports (hardcoded for the spike): relay WS `9910`, Vite `5173`.
@@ -187,8 +192,8 @@ Returns `{ id }`. Arrow / connect / frame stay deferred per the parent spec.
 
 ## Registration & the kill test
 
-1. `bun run dev` (Vite) and `bun relay.ts` (relay) running; open the canvas tab.
-2. `claude mcp add endgame-canvas -- bun /abs/path/server.ts`, restart so the tools load.
+1. `bun run dev` (Vite) and `bun src/relay.ts` (relay) running; open the canvas tab.
+2. `claude mcp add endgame-canvas -- bun /abs/path/src/server.ts`, restart so the tools load.
 3. Human draws the three annotations; agent calls `read_canvas` and must report all three.
    Pass → build the rest; fail → kill the tldraw-read approach.
 

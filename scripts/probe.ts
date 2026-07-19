@@ -1,4 +1,4 @@
-import { createCanvasClient } from '../server'
+import { createCanvasClient } from '../src/server'
 
 const client = createCanvasClient('ws://localhost:9910/?role=mcp')
 const cmd = process.argv[2] ?? 'get_snapshot'
