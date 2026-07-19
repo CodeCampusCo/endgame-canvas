@@ -66,6 +66,38 @@ const TOOL_DEFS = [
       required: ['type', 'x', 'y'],
     },
   },
+  {
+    name: 'create_frame',
+    description: 'Create a named frame on the canvas — the shared reference unit for a region of shapes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        x: { type: 'number' },
+        y: { type: 'number' },
+        w: { type: 'number' },
+        h: { type: 'number' },
+      },
+      required: ['name', 'x', 'y', 'w', 'h'],
+    },
+  },
+  {
+    name: 'list_frames',
+    description: 'List every frame on the page with id, name, position, size, and how many shapes it contains.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'read_frame',
+    description:
+      "Read one frame's contents: a cropped PNG of its children, their structured shape data, and arrow bindings.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Frame name, or a shape:... id to disambiguate.' },
+      },
+      required: ['name'],
+    },
+  },
 ]
 
 type ToolContent =
@@ -90,6 +122,19 @@ export function createDispatcher(call: CanvasCall) {
     },
     async create_shape(args) {
       return asText(JSON.stringify(await call('create_shape', args)))
+    },
+    async create_frame(args) {
+      return asText(JSON.stringify(await call('create_frame', args)))
+    },
+    async list_frames() {
+      return asText(JSON.stringify(await call('list_frames', {}), null, 2))
+    },
+    async read_frame(args) {
+      const r = await call('read_frame', args)
+      const text: ToolContent = { type: 'text', text: JSON.stringify({ shapes: r.shapes, bindings: r.bindings }, null, 2) }
+      if (r.url == null) return { content: [text] }
+      const data = String(r.url).split(',')[1] // strip "data:image/png;base64,"
+      return { content: [{ type: 'image', data, mimeType: 'image/png' }, text] }
     },
   }
 

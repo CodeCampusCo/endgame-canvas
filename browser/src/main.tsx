@@ -1,4 +1,4 @@
-import { Tldraw, type Editor, toRichText, createShapeId } from 'tldraw'
+import { Tldraw, type Editor, type TLShape, toRichText, createShapeId, getArrowBindings } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { createRoot } from 'react-dom/client'
 
@@ -13,6 +13,32 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   })
 }
 
+function shapeSnapshot(editor: Editor, s: TLShape) {
+  const b = editor.getShapePageBounds(s)
+  return {
+    id: s.id,
+    type: s.type,
+    x: b?.x,
+    y: b?.y,
+    w: b?.w,
+    h: b?.h,
+    text: editor.getShapeUtil(s).getText(s) ?? '',
+  }
+}
+
+function getFrames(editor: Editor) {
+  return editor
+    .getCurrentPageShapes()
+    .filter((s): s is Extract<TLShape, { type: 'frame' }> => s.type === 'frame')
+}
+
+function findFrame(editor: Editor, name: string) {
+  const frames = getFrames(editor)
+  return name.startsWith('shape:')
+    ? frames.find((s) => s.id === name)
+    : frames.find((s) => s.props.name === name)
+}
+
 async function runTool(editor: Editor, tool: string, params: any) {
   if (tool === 'read_canvas') {
     const shapes = editor.getCurrentPageShapes()
@@ -25,18 +51,43 @@ async function runTool(editor: Editor, tool: string, params: any) {
     return { url, width, height }
   }
   if (tool === 'get_snapshot') {
-    return editor.getCurrentPageShapes().map((s) => {
+    return editor.getCurrentPageShapes().map((s) => shapeSnapshot(editor, s))
+  }
+  if (tool === 'create_frame') {
+    const { name, x, y, w, h } = params
+    const id = createShapeId()
+    editor.createShape({ id, type: 'frame', x, y, props: { w, h, name } })
+    return { id }
+  }
+  if (tool === 'list_frames') {
+    const shapes = editor.getCurrentPageShapes()
+    return getFrames(editor).map((s) => {
       const b = editor.getShapePageBounds(s)
       return {
         id: s.id,
-        type: s.type,
+        name: s.props.name,
         x: b?.x,
         y: b?.y,
         w: b?.w,
         h: b?.h,
-        text: editor.getShapeUtil(s).getText(s) ?? '',
+        shapeCount: shapes.filter((c) => c.parentId === s.id).length,
       }
     })
+  }
+  if (tool === 'read_frame') {
+    const frame = findFrame(editor, params.name)
+    if (!frame) throw new Error('frame not found: ' + params.name)
+    const children = editor.getCurrentPageShapes().filter((s) => s.parentId === frame.id)
+    const bindings = children
+      .filter((s): s is Extract<TLShape, { type: 'arrow' }> => s.type === 'arrow')
+      .map((arrow) => {
+        const b = getArrowBindings(editor, arrow)
+        return { arrowId: arrow.id, start: b.start?.toId ?? null, end: b.end?.toId ?? null }
+      })
+    if (children.length === 0) return { url: null, width: 0, height: 0, shapes: [], bindings: [] }
+    const { blob, width, height } = await editor.toImage(children, { format: 'png', background: true })
+    const url = await blobToDataUrl(blob)
+    return { url, width, height, shapes: children.map((s) => shapeSnapshot(editor, s)), bindings }
   }
   if (tool === 'create_shape') {
     const { type, x, y, text } = params
