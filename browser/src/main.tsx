@@ -69,8 +69,9 @@ function bindArrow(editor: Editor, fromShapeId: TLShapeId, toShapeId: TLShapeId,
   return arrowId
 }
 
-// Shared by create_shape and the flowchart/connected tools: a geo node with
-// centered text, ready to be positioned by the caller.
+// Shared by the create_flowchart and create_connected tools: a geo node with
+// centered text, ready to be positioned by the caller. (create_shape keeps its
+// own inline geo block — the shared props are duplicated, not routed through here.)
 function createGeoNode(editor: Editor, geo: string, x: number, y: number, text: string, w: number, h: number): TLShapeId {
   const id = createShapeId()
   editor.createShape({
