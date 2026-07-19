@@ -98,6 +98,33 @@ const TOOL_DEFS = [
       required: ['name'],
     },
   },
+  {
+    name: 'create_arrow',
+    description:
+      'Create an arrow bound to two shapes — moving either shape drags the arrow with it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fromId: { type: 'string', description: 'Shape id the arrow starts at.' },
+        toId: { type: 'string', description: 'Shape id the arrow ends at.' },
+        text: { type: 'string', description: 'Optional label on the arrow.' },
+      },
+      required: ['fromId', 'toId'],
+    },
+  },
+  {
+    name: 'create_note',
+    description: 'Create a sticky note at a position, for annotation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        x: { type: 'number' },
+        y: { type: 'number' },
+        text: { type: 'string' },
+      },
+      required: ['x', 'y', 'text'],
+    },
+  },
 ]
 
 type ToolContent =
@@ -135,6 +162,12 @@ export function createDispatcher(call: CanvasCall) {
       if (r.url == null) return { content: [text] }
       const data = String(r.url).split(',')[1] // strip "data:image/png;base64,"
       return { content: [{ type: 'image', data, mimeType: 'image/png' }, text] }
+    },
+    async create_arrow(args) {
+      return asText(JSON.stringify(await call('create_arrow', args)))
+    },
+    async create_note(args) {
+      return asText(JSON.stringify(await call('create_note', args)))
     },
   }
 
