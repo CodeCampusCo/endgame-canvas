@@ -1,4 +1,4 @@
-import { Tldraw, type Editor, type TLShape, type IndexKey, toRichText, createShapeId, getArrowBindings, getIndices } from 'tldraw'
+import { Tldraw, type Editor, type TLShape, type IndexKey, toRichText, createShapeId, getArrowBindings, getIndices, PageRecordType } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { createRoot } from 'react-dom/client'
 
@@ -40,6 +40,8 @@ function findFrame(editor: Editor, name: string) {
 }
 
 async function runTool(editor: Editor, tool: string, params: any) {
+  // read_canvas/get_snapshot/list_frames/read_frame all call editor.getCurrentPageShapes(),
+  // so they're inherently scoped to the current page — switch_page re-scopes them for free.
   if (tool === 'read_canvas') {
     const shapes = editor.getCurrentPageShapes()
     if (shapes.length === 0) return { empty: true }
@@ -232,6 +234,25 @@ async function runTool(editor: Editor, tool: string, params: any) {
     const existing = ids.filter((id: any) => editor.getShape(id))
     editor.select(...existing)
     return { selected: editor.getSelectedShapeIds().length }
+  }
+  if (tool === 'create_page') {
+    const { name } = params
+    const id = PageRecordType.createId()
+    editor.createPage({ id, name })
+    return { id }
+  }
+  if (tool === 'list_pages') {
+    const current = editor.getCurrentPageId()
+    return editor.getPages().map((p) => ({ id: p.id, name: p.name, current: p.id === current }))
+  }
+  if (tool === 'switch_page') {
+    const { name } = params
+    const page = String(name).startsWith('page:')
+      ? editor.getPage(name)
+      : editor.getPages().find((p) => p.name === name)
+    if (!page) throw new Error('page not found: ' + name)
+    editor.setCurrentPage(page.id)
+    return { ok: true }
   }
   if (tool === 'export_image') {
     const { target, name, format } = params

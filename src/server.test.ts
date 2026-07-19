@@ -362,3 +362,42 @@ test('dispatch export_image → forwards target/name/format to the canvas call, 
     await unlink(path)
   }
 })
+
+// --- Family F: multi-page ---
+
+test('dispatch create_page → forwards name, returns id as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'page:board2' }
+  })
+  const args = { name: 'Board2' }
+  expect(await dispatch('create_page', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'page:board2' }) }],
+  })
+  expect(seen).toEqual({ tool: 'create_page', params: args })
+})
+
+test('dispatch list_pages → pretty JSON text', async () => {
+  const pages = [
+    { id: 'page:page', name: 'Page 1', current: true },
+    { id: 'page:board2', name: 'Board2', current: false },
+  ]
+  const dispatch = createDispatcher(async () => pages)
+  expect(await dispatch('list_pages', {})).toEqual({
+    content: [{ type: 'text', text: JSON.stringify(pages, null, 2) }],
+  })
+})
+
+test('dispatch switch_page → forwards name, returns ok as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { ok: true }
+  })
+  const args = { name: 'Board2' }
+  expect(await dispatch('switch_page', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ ok: true }) }],
+  })
+  expect(seen).toEqual({ tool: 'switch_page', params: args })
+})
