@@ -152,3 +152,44 @@ test('dispatch read_frame with url: null → text-only content, no image part', 
     content: [{ type: 'text', text: JSON.stringify({ shapes: [], bindings: [] }, null, 2) }],
   })
 })
+
+// --- Phase 2: bound arrows + sticky notes ---
+
+test('dispatch create_arrow → forwards fromId/toId/text, returns id as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:arrow1' }
+  })
+  const args = { fromId: 'shape:a', toId: 'shape:b', text: 'flows to' }
+  expect(await dispatch('create_arrow', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:arrow1' }) }],
+  })
+  expect(seen).toEqual({ tool: 'create_arrow', params: args })
+})
+
+test('dispatch create_arrow without text → still forwards fromId/toId, returns id', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:arrow2' }
+  })
+  const args = { fromId: 'shape:a', toId: 'shape:b' }
+  expect(await dispatch('create_arrow', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:arrow2' }) }],
+  })
+  expect(seen).toEqual({ tool: 'create_arrow', params: args })
+})
+
+test('dispatch create_note → forwards x/y/text, returns id as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:note1' }
+  })
+  const args = { x: 100, y: 200, text: 'hello' }
+  expect(await dispatch('create_note', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:note1' }) }],
+  })
+  expect(seen).toEqual({ tool: 'create_note', params: args })
+})

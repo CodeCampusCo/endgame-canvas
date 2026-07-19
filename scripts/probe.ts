@@ -19,6 +19,17 @@ if (cmd === 'create') {
   console.log(r.url ? `png ${r.width}x${r.height}, dataUrl length ${r.url.length}` : 'url: null (empty frame)')
   console.log('shapes:', JSON.stringify(r.shapes, null, 2))
   console.log('bindings:', JSON.stringify(r.bindings, null, 2))
+} else if (cmd === 'create-arrow') {
+  const fromId = process.argv[3]
+  const toId = process.argv[4]
+  const text = process.argv[5]
+  if (!fromId || !toId) throw new Error('usage: create-arrow <fromId> <toId> [text]')
+  console.log(await client.call('create_arrow', { fromId, toId, text }))
+} else if (cmd === 'create-note') {
+  const x = Number(process.argv[3] ?? 500)
+  const y = Number(process.argv[4] ?? 500)
+  const text = process.argv[5] ?? 'hello'
+  console.log(await client.call('create_note', { x, y, text }))
 } else {
   console.log(JSON.stringify(await client.call('get_snapshot', {}), null, 2))
 }

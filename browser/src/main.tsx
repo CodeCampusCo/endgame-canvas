@@ -113,6 +113,37 @@ async function runTool(editor: Editor, tool: string, params: any) {
     }
     return { id }
   }
+  if (tool === 'create_arrow') {
+    const { fromId, toId, text } = params
+    const arrowId = createShapeId()
+    const start = editor.getShapePageBounds(fromId)
+    editor.createShape({
+      id: arrowId,
+      type: 'arrow',
+      x: start?.x ?? 0,
+      y: start?.y ?? 0,
+      props: text ? { text } : {},
+    })
+    editor.createBinding({
+      type: 'arrow',
+      fromId: arrowId,
+      toId: fromId,
+      props: { terminal: 'start', normalizedAnchor: { x: 0.5, y: 0.5 }, isPrecise: false, isExact: false },
+    })
+    editor.createBinding({
+      type: 'arrow',
+      fromId: arrowId,
+      toId: toId,
+      props: { terminal: 'end', normalizedAnchor: { x: 0.5, y: 0.5 }, isPrecise: false, isExact: false },
+    })
+    return { id: arrowId }
+  }
+  if (tool === 'create_note') {
+    const { x, y, text } = params
+    const id = createShapeId()
+    editor.createShape({ id, type: 'note', x, y, props: { richText: toRichText(text) } })
+    return { id }
+  }
   throw new Error(`unknown tool: ${tool}`)
 }
 
