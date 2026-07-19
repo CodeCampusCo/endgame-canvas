@@ -239,8 +239,7 @@ async function runTool(editor: Editor, tool: string, params: any) {
     if (target === 'frame') {
       const frame = findFrame(editor, name)
       if (!frame) throw new Error('frame not found: ' + name)
-      const children = editor.getCurrentPageShapes().filter((s) => s.parentId === frame.id)
-      shapes = [frame, ...children]
+      shapes = [frame]
     } else if (target === 'selection') {
       const ids = editor.getSelectedShapeIds()
       if (ids.length === 0) throw new Error('nothing selected')
