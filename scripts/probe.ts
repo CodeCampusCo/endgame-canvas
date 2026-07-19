@@ -4,13 +4,20 @@ const client = createCanvasClient('ws://localhost:9910/?role=mcp')
 const cmd = process.argv[2] ?? 'get_snapshot'
 
 if (cmd === 'create') {
-  console.log(await client.call('create_shape', { type: 'rectangle', x: 100, y: 100, text: 'probe' }))
+  const x = Number(process.argv[3] ?? 100)
+  const y = Number(process.argv[4] ?? 100)
+  const text = process.argv[5] ?? 'probe'
+  console.log(await client.call('create_shape', { type: 'rectangle', x, y, text }))
 } else if (cmd === 'read') {
   const r: any = await client.call('read_canvas', {})
   console.log(r.empty ? 'empty' : `png ${r.width}x${r.height}, dataUrl length ${r.url.length}`)
 } else if (cmd === 'create-frame') {
   const name = process.argv[3] ?? 'probe-frame'
-  console.log(await client.call('create_frame', { name, x: 100, y: 300, w: 400, h: 300 }))
+  const x = Number(process.argv[4] ?? 100)
+  const y = Number(process.argv[5] ?? 300)
+  const w = Number(process.argv[6] ?? 400)
+  const h = Number(process.argv[7] ?? 300)
+  console.log(await client.call('create_frame', { name, x, y, w, h }))
 } else if (cmd === 'list-frames') {
   console.log(JSON.stringify(await client.call('list_frames', {}), null, 2))
 } else if (cmd === 'read-frame') {
