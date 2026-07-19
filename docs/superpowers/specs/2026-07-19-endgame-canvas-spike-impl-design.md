@@ -15,8 +15,8 @@ Three processes:
 
 ```
 Terminal 1:  bun run dev        # Vite, serves the browser app (browser/)
-Terminal 2:  bun relay.ts       # WS hub, long-lived — the durable core
-Claude Code ──spawn──► bun server.ts    # stdio MCP + WS client → relay
+Terminal 2:  bun src/relay.ts   # WS hub, long-lived — the durable core
+Claude Code ──spawn──► bun src/server.ts   # stdio MCP + WS client → relay
 
 Browser tab ───────────(WS client, role=browser)──►  relay :9910
 server.ts   ───────────(WS client, role=mcp)─────►  relay :9910
@@ -80,20 +80,25 @@ Single package, no build step on the server side:
 
 ```
 endgame-canvas/
-├── server.ts            # stdio MCP (@modelcontextprotocol/sdk) + WS client → relay
-├── relay.ts             # Bun.serve({ websocket }) hub, role-aware routing
-├── package.json         # deps + scripts
-├── browser/             # Vite + React + tldraw app
+├── src/                 # Bun backend
+│   ├── server.ts        # stdio MCP (@modelcontextprotocol/sdk) + WS client → relay
+│   ├── server.test.ts
+│   ├── relay.ts         # Bun.serve({ websocket }) hub, role-aware routing
+│   └── relay.test.ts
+├── browser/             # Vite + React + tldraw frontend
 │   ├── index.html
-│   ├── vite.config.ts
 │   └── src/
 │       └── main.tsx     # <Tldraw persistenceKey> + onMount → WS client → runs tools on editor
+├── scripts/
+│   └── probe.ts         # drives the browser through the relay (manual verification)
+├── vite.config.ts       # root: 'browser'
+├── package.json         # deps + scripts
 └── docs/specs/...
 ```
 
 Scripts (`package.json`):
-- `relay`  → `bun relay.ts`
-- `server` → `bun server.ts`  (also the command registered with `claude mcp add`)
+- `relay`  → `bun src/relay.ts`
+- `server` → `bun src/server.ts`  (also the command registered with `claude mcp add`)
 - `dev`    → vite dev server for `browser/`
 
 Ports (hardcoded for the spike): relay WS `9910`, Vite `5173`.
@@ -120,25 +125,30 @@ restart self-heals without touching the canvas (state is in `persistenceKey` sto
 
 ### `read_canvas` — the one under test
 
-Browser side:
+Browser side (**as-built**, tldraw@3.15.6):
 ```
 const shapes = editor.getCurrentPageShapes()
 if (shapes.length === 0) return { empty: true }
-const { url, width, height } = await editor.toImageDataUrl(shapes, {
-  format: 'png', background: true,
-})
+const { blob, width, height } = await editor.toImage(shapes, { format: 'png', background: true })
+const url = await blobToDataUrl(blob)   // FileReader.readAsDataURL → "data:image/png;base64,…"
+return { url, width, height }
 ```
-`toImageDataUrl(shapes, opts)` takes an **array of shapes** (not a `{ bounds }` object) and
-computes the bounding box from them, so passing *all* current-page shapes crops tight to the
-content with nothing off-frame — the same net effect the user approved ("crop to all
-shapes, not the viewport"), just via the current API. It returns `{ url, width, height }`;
-`url` is the PNG data URL. Server converts that into MCP **image content** so the agent sees
-the whole canvas at once — required to resolve all three kill-criterion annotations
-(scribbled text, which shape a circle encloses, what an arrow points at).
+**API note:** tldraw@3.15.6 exposes `editor.toImage(shapes, opts)` returning
+`{ blob, width, height }` — there is **no** `toImageDataUrl` in this version (it exists on
+newer/main tldraw). We wrap the blob with a 6-line `FileReader`-based `blobToDataUrl` helper
+(tldraw's own `FileHelpers.blobToDataUrl` is not re-exported from the public entry) to keep
+the `{ url, width, height }` contract the server consumes. `toImage(shapes, opts)` takes an
+**array of shapes** (not a `{ bounds }` object) and computes the bounding box from them —
+passing *all* current-page shapes crops tight to content with nothing off-frame (the net
+effect the user approved: "crop to all shapes, not the viewport"). `url` is the PNG data
+URL; the server strips the `data:image/png;base64,` prefix and returns MCP **image content**
+so the agent sees the whole canvas at once. Kill test (2026-07-19): **PASS** — agent read a
+freehand scribble, the shape a freehand circle enclosed, and an arrow's target off this path.
 
 `TLImageExportOptions` = `{ format, scale, quality, background, backgroundColor,
 boundingBoxMode, darkMode, ... }` (no `bounds`, no `padding`). We pass `format: 'png'` and
-`background: true`.
+`background: true`. Note `width`/`height` are the pre-`pixelRatio` SVG dims; the actual PNG
+is `pixelRatio`× larger (default 2). The server ignores `width`/`height`, using only `url`.
 
 ### `get_snapshot` — cheap structured read
 
@@ -182,8 +192,8 @@ Returns `{ id }`. Arrow / connect / frame stay deferred per the parent spec.
 
 ## Registration & the kill test
 
-1. `bun run dev` (Vite) and `bun relay.ts` (relay) running; open the canvas tab.
-2. `claude mcp add endgame-canvas -- bun /abs/path/server.ts`, restart so the tools load.
+1. `bun run dev` (Vite) and `bun src/relay.ts` (relay) running; open the canvas tab.
+2. `claude mcp add endgame-canvas -- bun /abs/path/src/server.ts`, restart so the tools load.
 3. Human draws the three annotations; agent calls `read_canvas` and must report all three.
    Pass → build the rest; fail → kill the tldraw-read approach.
 

@@ -4,3 +4,6 @@ dist/
 .dev.vars
 *.log
 .DS_Store
+
+# Process scratch — not committed
+docs/superpowers/plans/

@@ -23,4 +23,4 @@ server-side. The WS relay routes each response to its caller only — never broa
 
 Bun (runtime / package manager / test) · tldraw + React + Vite (browser app) ·
 `@modelcontextprotocol/sdk` (stdio MCP) · native `Bun.serve` WebSocket relay. The MCP
-server runs as `bun server.ts` — no build step.
+server runs as `bun src/server.ts` — no build step.
