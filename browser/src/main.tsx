@@ -144,6 +144,34 @@ async function runTool(editor: Editor, tool: string, params: any) {
     editor.createShape({ id, type: 'note', x, y, props: { richText: toRichText(text) } })
     return { id }
   }
+  if (tool === 'update_shape') {
+    const { id, x, y, w, h, text, color, fill } = params
+    const shape = editor.getShape(id)
+    if (!shape) throw new Error('shape not found: ' + id)
+    const props: Record<string, unknown> = {}
+    if (w !== undefined) props.w = w
+    if (h !== undefined) props.h = h
+    if (color !== undefined) props.color = color
+    if (fill !== undefined) props.fill = fill
+    if (text !== undefined) {
+      if (shape.type === 'arrow') props.text = text
+      else props.richText = toRichText(text)
+    }
+    editor.updateShape({
+      id,
+      type: shape.type,
+      ...(x !== undefined ? { x } : {}),
+      ...(y !== undefined ? { y } : {}),
+      props,
+    })
+    return { id }
+  }
+  if (tool === 'delete_shape') {
+    const { ids } = params
+    const existing = ids.filter((id: any) => editor.getShape(id))
+    editor.deleteShapes(existing)
+    return { deleted: existing.length }
+  }
   throw new Error(`unknown tool: ${tool}`)
 }
 

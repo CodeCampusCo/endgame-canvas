@@ -193,3 +193,44 @@ test('dispatch create_note → forwards x/y/text, returns id as text', async () 
   })
   expect(seen).toEqual({ tool: 'create_note', params: args })
 })
+
+// --- Phase 3: edit / annotate ---
+
+test('dispatch update_shape → forwards a representative subset, returns id as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:a' }
+  })
+  const args = { id: 'shape:a', x: 100, y: 200, text: 'relabeled', color: 'blue' }
+  expect(await dispatch('update_shape', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:a' }) }],
+  })
+  expect(seen).toEqual({ tool: 'update_shape', params: args })
+})
+
+test('dispatch update_shape with only id + color → forwards just those, returns id as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:a' }
+  })
+  const args = { id: 'shape:a', color: 'red' }
+  expect(await dispatch('update_shape', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:a' }) }],
+  })
+  expect(seen).toEqual({ tool: 'update_shape', params: args })
+})
+
+test('dispatch delete_shape → forwards ids, returns deleted count as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { deleted: 2 }
+  })
+  const args = { ids: ['shape:a', 'shape:b'] }
+  expect(await dispatch('delete_shape', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ deleted: 2 }) }],
+  })
+  expect(seen).toEqual({ tool: 'delete_shape', params: args })
+})

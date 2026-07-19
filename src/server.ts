@@ -125,6 +125,35 @@ const TOOL_DEFS = [
       required: ['x', 'y', 'text'],
     },
   },
+  {
+    name: 'update_shape',
+    description: 'Edit an existing shape — move, resize, relabel, or recolour it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        x: { type: 'number' },
+        y: { type: 'number' },
+        w: { type: 'number' },
+        h: { type: 'number' },
+        text: { type: 'string' },
+        color: { type: 'string' },
+        fill: { type: 'string' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'delete_shape',
+    description: 'Delete one or more shapes by id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['ids'],
+    },
+  },
 ]
 
 type ToolContent =
@@ -168,6 +197,12 @@ export function createDispatcher(call: CanvasCall) {
     },
     async create_note(args) {
       return asText(JSON.stringify(await call('create_note', args)))
+    },
+    async update_shape(args) {
+      return asText(JSON.stringify(await call('update_shape', args)))
+    },
+    async delete_shape(args) {
+      return asText(JSON.stringify(await call('delete_shape', args)))
     },
   }
 
