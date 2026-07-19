@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
@@ -339,10 +340,14 @@ export function createDispatcher(call: CanvasCall) {
     },
     async export_image(args) {
       const { target, format, path, name } = args
+      const resolved = resolve(path)
+      if (!resolved.startsWith(process.cwd() + '/')) {
+        throw new Error(`path must be inside the server working directory: ${path}`)
+      }
       const r = await call('export_image', { target, name, format })
       const base64 = String(r.url).split(',')[1] // strip "data:<mime>;base64,"
-      await Bun.write(path, Buffer.from(base64, 'base64'))
-      return asText(JSON.stringify({ path, width: r.width, height: r.height }))
+      await Bun.write(resolved, Buffer.from(base64, 'base64'))
+      return asText(JSON.stringify({ path: resolved, width: r.width, height: r.height }))
     },
   }
 
