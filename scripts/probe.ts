@@ -44,6 +44,13 @@ if (cmd === 'create') {
   const ids = process.argv.slice(3)
   if (ids.length === 0) throw new Error('usage: delete-shape <id...>')
   console.log(await client.call('delete_shape', { ids }))
+} else if (cmd === 'zoom-to-frame') {
+  const name = process.argv[3]
+  if (!name) throw new Error('usage: zoom-to-frame <name>')
+  console.log(await client.call('zoom_to_frame', { name }))
+} else if (cmd === 'select') {
+  const ids = process.argv.slice(3)
+  console.log(await client.call('select', { ids }))
 } else {
   console.log(JSON.stringify(await client.call('get_snapshot', {}), null, 2))
 }

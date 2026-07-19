@@ -172,6 +172,21 @@ async function runTool(editor: Editor, tool: string, params: any) {
     editor.deleteShapes(existing)
     return { deleted: existing.length }
   }
+  if (tool === 'zoom_to_frame') {
+    const frame = findFrame(editor, params.name)
+    if (!frame) throw new Error('frame not found: ' + params.name)
+    const bounds = editor.getShapePageBounds(frame)
+    editor.zoomToBounds(bounds!)
+    return { ok: true }
+  }
+  if (tool === 'select') {
+    const { ids } = params
+    // editor.select() stores whatever ids it's given verbatim — it does not check
+    // that they reference existing shapes — so filter first for an honest count.
+    const existing = ids.filter((id: any) => editor.getShape(id))
+    editor.select(...existing)
+    return { selected: editor.getSelectedShapeIds().length }
+  }
   throw new Error(`unknown tool: ${tool}`)
 }
 
