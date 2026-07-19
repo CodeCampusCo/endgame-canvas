@@ -307,7 +307,7 @@ export function createDispatcher(call: CanvasCall) {
     async export_image(args) {
       const { target, format, path, name } = args
       const resolved = resolve(path)
-      if (!resolved.startsWith(process.cwd())) {
+      if (!resolved.startsWith(process.cwd() + '/')) {
         throw new Error(`path must be inside the server working directory: ${path}`)
       }
       const r = await call('export_image', { target, name, format })

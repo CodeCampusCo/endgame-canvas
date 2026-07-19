@@ -376,6 +376,17 @@ test('dispatch export_image → rejects paths outside the server cwd', async () 
   expect(r.content[0].text).toInclude('path must be inside the server working directory')
 })
 
+test('dispatch export_image → rejects a sibling directory whose name starts with the cwd prefix', async () => {
+  const dispatch = createDispatcher(async () => ({
+    url: 'data:image/png;base64,aGVsbG8=',
+    width: 10,
+    height: 10,
+  }))
+  const r = await dispatch('export_image', { target: 'canvas', format: 'png', path: resolve(process.cwd() + '-evil/file.png') })
+  expect(r.isError).toBe(true)
+  expect(r.content[0].text).toInclude('path must be inside the server working directory')
+})
+
 test('dispatch export_image → resolves a relative path against cwd', async () => {
   const dispatch = createDispatcher(async () => ({
     url: 'data:image/png;base64,aGVsbG8=',
