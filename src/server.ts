@@ -158,7 +158,7 @@ export function createDispatcher(call: CanvasCall) {
     },
     async read_frame(args) {
       const r = await call('read_frame', args)
-      const text: ToolContent = { type: 'text', text: JSON.stringify({ shapes: r.shapes, bindings: r.bindings }, null, 2) }
+      const text: ToolContent = { type: 'text', text: JSON.stringify({ shapes: r.shapes, bindings: r.bindings, frameId: r.frameId }, null, 2) }
       if (r.url == null) return { content: [text] }
       const data = String(r.url).split(',')[1] // strip "data:image/png;base64,"
       return { content: [{ type: 'image', data, mimeType: 'image/png' }, text] }
