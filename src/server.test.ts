@@ -1,12 +1,14 @@
 import { expect, test } from 'bun:test'
-import { unlink } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { mkdir, rm, unlink } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 import { startRelay } from './relay'
 import { createCanvasClient, createDispatcher } from './server'
 
+const TEST_DIR = resolve('test-output')
+await mkdir(TEST_DIR, { recursive: true })
+
 function tempPath(ext: string) {
-  return join(tmpdir(), `export-image-test-${crypto.randomUUID()}.${ext}`)
+  return join(TEST_DIR, `export-image-test-${crypto.randomUUID()}.${ext}`)
 }
 
 function fakeBrowser(port: number, handler: (req: any) => any): Promise<WebSocket> {
@@ -360,5 +362,33 @@ test('dispatch export_image → forwards target/name/format to the canvas call, 
     expect(seen).toEqual({ tool: 'export_image', params: { target: 'frame', name: 'probe-frame', format: 'png' } })
   } finally {
     await unlink(path)
+  }
+})
+
+test('dispatch export_image → rejects paths outside the server cwd', async () => {
+  const dispatch = createDispatcher(async () => ({
+    url: 'data:image/png;base64,aGVsbG8=',
+    width: 10,
+    height: 10,
+  }))
+  const r = await dispatch('export_image', { target: 'canvas', format: 'png', path: '/etc/passwd' })
+  expect(r.isError).toBe(true)
+  expect(r.content[0].text).toInclude('path must be inside the server working directory')
+})
+
+test('dispatch export_image → resolves a relative path against cwd', async () => {
+  const dispatch = createDispatcher(async () => ({
+    url: 'data:image/png;base64,aGVsbG8=',
+    width: 10,
+    height: 10,
+  }))
+  const rel = `test-output/rel-test-${crypto.randomUUID()}.png`
+  try {
+    const r = await dispatch('export_image', { target: 'canvas', format: 'png', path: rel })
+    expect(r.isError).toBeUndefined()
+    const resolved = JSON.parse(r.content[0].text)
+    expect(resolved.path).toBe(resolve(rel))
+  } finally {
+    await unlink(rel)
   }
 })
