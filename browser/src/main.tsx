@@ -183,7 +183,8 @@ async function runTool(editor: Editor, tool: string, params: any) {
     const frame = findFrame(editor, params.name)
     if (!frame) throw new Error('frame not found: ' + params.name)
     const bounds = editor.getShapePageBounds(frame)
-    editor.zoomToBounds(bounds!)
+    if (!bounds) throw new Error('frame has no bounds: ' + params.name)
+    editor.zoomToBounds(bounds)
     return { ok: true }
   }
   if (tool === 'select') {
