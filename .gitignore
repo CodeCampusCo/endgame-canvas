@@ -7,3 +7,4 @@ dist/
 
 # Process scratch — not committed
 docs/superpowers/plans/
+test-output/
