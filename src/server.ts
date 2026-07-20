@@ -376,7 +376,7 @@ const TOOL_DEFS = [
   },
   {
     name: 'create_connected',
-    description: 'Create a new node next to an existing shape and connect it with a bound arrow — connect a new node to an existing shape.',
+    description: 'Create a new node next to an existing shape and connect it to that shape with a bound arrow.',
     inputSchema: {
       type: 'object',
       properties: {
