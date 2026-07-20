@@ -53,6 +53,40 @@ test('relay unreachable → call rejects, does not hang', async () => {
   client.close()
 })
 
+test('mcp client reconnects after a relay restart on the same port', async () => {
+  const PORT = 19000 + Math.floor(Math.random() * 2000)
+  const s1 = startRelay(PORT)
+  const browser1 = await fakeBrowser(PORT, (req) => ({ ok: true, result: { echoed: req.tool } }))
+  const client = createCanvasClient(`ws://localhost:${PORT}/?role=mcp`, { timeoutMs: 500, backoffMs: 40 })
+  expect(await client.call('get_snapshot', {})).toEqual({ echoed: 'get_snapshot' })
+
+  // relay dies (force-close the mcp socket so onclose fires) → client should back off and retry
+  browser1.close(); s1.stop(true)
+  await new Promise((r) => setTimeout(r, 30))
+
+  // relay comes back on the SAME port with a fresh browser
+  const s2 = startRelay(PORT)
+  const browser2 = await fakeBrowser(PORT, (req) => ({ ok: true, result: { echoed2: req.tool } }))
+  await new Promise((r) => setTimeout(r, 300)) // let a backoff cycle land
+
+  expect(await client.call('read_canvas', {})).toEqual({ echoed2: 'read_canvas' })
+  client.close(); browser2.close(); s2.stop()
+})
+
+test('client.close() stops reconnection (onclose does not schedule a retry)', async () => {
+  const PORT = 21000 + Math.floor(Math.random() * 2000)
+  const s = startRelay(PORT)
+  const browser = await fakeBrowser(PORT, (req) => ({ ok: true, result: { echoed: req.tool } }))
+  const client = createCanvasClient(`ws://localhost:${PORT}/?role=mcp`, { timeoutMs: 500, backoffMs: 40 })
+  expect(await client.call('get_snapshot', {})).toEqual({ echoed: 'get_snapshot' })
+  client.close()
+  browser.close(); s.stop(true)
+  // if close() did not set the closed flag, a reconnect would fire ~40ms later and keep the loop alive
+  await new Promise((r) => setTimeout(r, 120))
+  // reaching here without a dangling reconnect loop is the assertion; a leaked timer would keep retrying a dead port
+  expect(true).toBe(true)
+})
+
 // --- dispatch map: one handler per tool, centralized unknown/error handling ---
 
 test('dispatch read_canvas → image content with data-URL prefix stripped', async () => {

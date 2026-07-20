@@ -5,28 +5,56 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
 
-export function createCanvasClient(relayUrl: string, opts: { timeoutMs?: number } = {}) {
+export function createCanvasClient(relayUrl: string, opts: { timeoutMs?: number; backoffMs?: number } = {}) {
   const timeoutMs = opts.timeoutMs ?? 10000
+  const initialBackoff = opts.backoffMs ?? 500
   const pending = new Map<string, Pending>()
-  const ws = new WebSocket(relayUrl)
-  const ready = new Promise<void>((resolve, reject) => {
-    ws.onopen = () => resolve()
-    ws.onerror = () => reject(new Error('relay connection failed'))
-  })
-  ready.catch(() => {}) // avoid unhandled-rejection noise when no call is in flight
 
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data as string)
-    const p = pending.get(msg.requestId)
-    if (!p) return
-    pending.delete(msg.requestId)
-    clearTimeout(p.timer)
-    if (msg.ok) p.resolve(msg.result)
-    else p.reject(new Error(msg.error))
+  let ws: WebSocket
+  let ready: Promise<void>
+  let closed = false
+  let backoff = initialBackoff
+
+  function connect() {
+    if (closed) return
+    ws = new WebSocket(relayUrl)
+    ready = new Promise<void>((resolve, reject) => {
+      ws.onopen = () => { backoff = initialBackoff; resolve() } // reset backoff on a good connection
+      ws.onerror = () => reject(new Error('relay connection failed'))
+    })
+    ready.catch(() => {}) // avoid unhandled-rejection noise when no call is in flight
+
+    ws.onmessage = (e) => {
+      let msg: any
+      try {
+        msg = JSON.parse(e.data as string)
+      } catch {
+        return // ignore a malformed frame
+      }
+      const p = pending.get(msg.requestId)
+      if (!p) return
+      pending.delete(msg.requestId)
+      clearTimeout(p.timer)
+      if (msg.ok) p.resolve(msg.result)
+      else p.reject(new Error(msg.error))
+    }
+
+    ws.onclose = () => {
+      if (closed) return // deliberate close() — do not reconnect
+      // The socket dropped (relay restart). Fail every in-flight call, then retry with backoff.
+      for (const [, p] of pending) {
+        clearTimeout(p.timer)
+        p.reject(new Error('relay disconnected'))
+      }
+      pending.clear()
+      setTimeout(connect, backoff)
+      backoff = Math.min(backoff * 2, 5000)
+    }
   }
+  connect()
 
   async function call(tool: string, params?: unknown) {
-    await ready
+    await ready // awaits the CURRENT connection; after a reconnect this is the fresh socket's gate
     const requestId = crypto.randomUUID()
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -34,11 +62,18 @@ export function createCanvasClient(relayUrl: string, opts: { timeoutMs?: number 
         reject(new Error('canvas timeout'))
       }, timeoutMs)
       pending.set(requestId, { resolve, reject, timer })
-      ws.send(JSON.stringify({ requestId, tool, params }))
+      try {
+        ws.send(JSON.stringify({ requestId, tool, params }))
+      } catch {
+        // socket closing/closed between the ready gate and send — don't leak the entry/timer
+        pending.delete(requestId)
+        clearTimeout(timer)
+        reject(new Error('relay send failed'))
+      }
     })
   }
 
-  return { call, close: () => ws.close() }
+  return { call, close: () => { closed = true; ws.close() } }
 }
 
 const TOOL_DEFS = [
