@@ -495,8 +495,8 @@ export function createDispatcher(call: CanvasCall) {
         throw new Error(`path must be inside the server working directory: ${path}`)
       }
       const r = await call('export_image', { target, name, format })
-      const base64 = String(r.url).split(',')[1] // strip "data:<mime>;base64,"
-      await Bun.write(resolved, Buffer.from(base64, 'base64'))
+      if (typeof r.svg === 'string') await Bun.write(resolved, r.svg)
+      else await Bun.write(resolved, Buffer.from(String(r.url).split(',')[1], 'base64'))
       return asText(JSON.stringify({ path: resolved, width: r.width, height: r.height }))
     },
   }
