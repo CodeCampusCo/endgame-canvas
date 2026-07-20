@@ -1,23 +1,18 @@
 # endgame-canvas
 
-A localhost tldraw canvas exposed over MCP — a shared visual medium where a human and an agent
-draw and read the same canvas to align understanding and produce diagrams: a personal
-whiteboard, driven from chat. See README.md for the product overview.
+A localhost tldraw canvas exposed over MCP — a human and an agent draw and read the same canvas
+from chat. README.md is the product overview; this file is the working guide for the codebase —
+the invariants to preserve and the decisions behind them.
 
-## Status
+## Scope (a settled decision — don't silently reverse it)
 
-**Working tool set.** An agent can read a human's freehand off the live canvas, and the frame
-whiteboard plus the full draw/export vocabulary are built: frames (create/list/read), bound
-arrows, notes, edit/delete, camera + selection, extended geo shapes, lines and highlights,
-image export to disk, multi-page, and composite flowcharts. Relay socket-lifecycle hardening
-and per-agent attribution colours are in as well.
-
-**Scope: one human, one agent, one browser.** Multi-agent orchestration ("Mode B" — write
-serialization / turn-token, HTTP transport for many MCP clients) was explored and **cut**. Two
-reasons worth remembering: writes are already serialized for free (every call funnels through
-one relay into one browser, and every write tool is synchronous, so writes cannot interleave),
-and multi-browser would require a real multiplayer sync backend, which this localhost tool
-does not want.
+**One human, one agent, one browser.** The full tool set is built (README lists it); the
+remaining thing to know when working here is what was deliberately **cut**: multi-agent
+orchestration ("Mode B" — write serialization / turn-token, HTTP transport for many MCP
+clients). Don't re-add it without a reason, because the premise was wrong — writes are already
+serialized (every call funnels through one relay into one browser, and every write tool is
+synchronous, so they cannot interleave), and multi-browser would require a real multiplayer sync
+backend this localhost tool does not want.
 
 ## Architecture rule
 
@@ -47,7 +42,6 @@ tools report page space; shape `x`/`y` are parent-local).
 ## Stack
 
 Bun (runtime / package manager / test) · tldraw + React + Vite (browser app) ·
-`@modelcontextprotocol/sdk` (stdio MCP) · native `Bun.serve` WebSocket relay. The MCP server
-runs as `bun src/server.ts` — no build step. `bun run start` (`scripts/dev.ts`) launches the
-relay + Vite together in one terminal, auto-freeing stale ports; `bun run relay` / `bun run dev`
-still work individually for debugging.
+`@modelcontextprotocol/sdk` (stdio MCP) · native `Bun.serve` WebSocket relay. **No build step.**
+`bun test` runs the suite; `bun run start` brings up the live stack (relay + Vite). See README
+for the run commands and MCP setup.
