@@ -85,6 +85,32 @@ if (cmd === 'create') {
   const name = process.argv[3]
   if (!name) throw new Error('usage: switch-page <name>')
   console.log(await client.call('switch_page', { name }))
+} else if (cmd === 'create-flowchart') {
+  // Hardcoded sample graph — a JSON arg is awkward on the CLI.
+  // A -> B, A -> C, B -> D, C -> D; A rectangle "Start", D ellipse "End".
+  const nodes = [
+    { key: 'A', text: 'Start' },
+    { key: 'B', text: 'Step 1' },
+    { key: 'C', text: 'Step 2' },
+    { key: 'D', text: 'End', shape: 'ellipse' },
+  ]
+  const edges = [
+    { from: 'A', to: 'B' },
+    { from: 'A', to: 'C' },
+    { from: 'B', to: 'D' },
+    { from: 'C', to: 'D' },
+  ]
+  const layout = process.argv[3] ?? 'tree'
+  const frame = process.argv[4]
+  const x = Number(process.argv[5] ?? 200)
+  const y = Number(process.argv[6] ?? 2100)
+  console.log(await client.call('create_flowchart', { nodes, edges, layout, frame, x, y }))
+} else if (cmd === 'create-connected') {
+  const fromId = process.argv[3]
+  const text = process.argv[4] ?? 'Branch'
+  const direction = process.argv[5] ?? 'right'
+  if (!fromId) throw new Error('usage: create-connected <fromId> [text] [right|down]')
+  console.log(await client.call('create_connected', { fromId, text, direction }))
 } else if (cmd === 'export-image') {
   // usage: export-image <canvas|frame|selection> <png|svg> <path> [frameName]
   // Goes through the same dispatcher the real MCP server uses, so this
