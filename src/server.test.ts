@@ -237,3 +237,31 @@ test('dispatch delete_shape → forwards ids, returns deleted count as text', as
   })
   expect(seen).toEqual({ tool: 'delete_shape', params: args })
 })
+
+// --- Phase 4: navigate / point back ---
+
+test('dispatch zoom_to_frame → forwards name, returns ok as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { ok: true }
+  })
+  const args = { name: 'probe-frame' }
+  expect(await dispatch('zoom_to_frame', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ ok: true }) }],
+  })
+  expect(seen).toEqual({ tool: 'zoom_to_frame', params: args })
+})
+
+test('dispatch select → forwards ids, returns honest selected count as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { selected: 2 }
+  })
+  const args = { ids: ['shape:a', 'shape:b'] }
+  expect(await dispatch('select', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ selected: 2 }) }],
+  })
+  expect(seen).toEqual({ tool: 'select', params: args })
+})

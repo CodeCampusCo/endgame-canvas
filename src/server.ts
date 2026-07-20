@@ -154,6 +154,28 @@ const TOOL_DEFS = [
       required: ['ids'],
     },
   },
+  {
+    name: 'zoom_to_frame',
+    description: 'Move the camera to a named frame — point the shared view at it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Frame name, or a shape:... id to disambiguate.' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'select',
+    description: 'Select shapes by id, highlighting them on the canvas — point back at specific shapes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['ids'],
+    },
+  },
 ]
 
 type ToolContent =
@@ -203,6 +225,12 @@ export function createDispatcher(call: CanvasCall) {
     },
     async delete_shape(args) {
       return asText(JSON.stringify(await call('delete_shape', args)))
+    },
+    async zoom_to_frame(args) {
+      return asText(JSON.stringify(await call('zoom_to_frame', args)))
+    },
+    async select(args) {
+      return asText(JSON.stringify(await call('select', args)))
     },
   }
 

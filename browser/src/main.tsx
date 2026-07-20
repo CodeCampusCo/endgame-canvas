@@ -115,6 +115,8 @@ async function runTool(editor: Editor, tool: string, params: any) {
   }
   if (tool === 'create_arrow') {
     const { fromId, toId, text } = params
+    if (!editor.getShape(fromId)) throw new Error('shape not found: ' + fromId)
+    if (!editor.getShape(toId)) throw new Error('shape not found: ' + toId)
     const arrowId = createShapeId()
     const start = editor.getShapePageBounds(fromId)
     editor.createShape({
@@ -157,11 +159,16 @@ async function runTool(editor: Editor, tool: string, params: any) {
       if (shape.type === 'arrow') props.text = text
       else props.richText = toRichText(text)
     }
+    let local: { x: number; y: number } | undefined
+    if (x !== undefined || y !== undefined) {
+      const pb = editor.getShapePageBounds(shape) // page-space top-left
+      const pagePoint = { x: x ?? pb!.x, y: y ?? pb!.y }
+      local = editor.getPointInParentSpace(shape, pagePoint)
+    }
     editor.updateShape({
       id,
       type: shape.type,
-      ...(x !== undefined ? { x } : {}),
-      ...(y !== undefined ? { y } : {}),
+      ...(local ? { x: local.x, y: local.y } : {}),
       props,
     })
     return { id }
@@ -171,6 +178,22 @@ async function runTool(editor: Editor, tool: string, params: any) {
     const existing = ids.filter((id: any) => editor.getShape(id))
     editor.deleteShapes(existing)
     return { deleted: existing.length }
+  }
+  if (tool === 'zoom_to_frame') {
+    const frame = findFrame(editor, params.name)
+    if (!frame) throw new Error('frame not found: ' + params.name)
+    const bounds = editor.getShapePageBounds(frame)
+    if (!bounds) throw new Error('frame has no bounds: ' + params.name)
+    editor.zoomToBounds(bounds)
+    return { ok: true }
+  }
+  if (tool === 'select') {
+    const { ids } = params
+    // editor.select() stores whatever ids it's given verbatim — it does not check
+    // that they reference existing shapes — so filter first for an honest count.
+    const existing = ids.filter((id: any) => editor.getShape(id))
+    editor.select(...existing)
+    return { selected: editor.getSelectedShapeIds().length }
   }
   throw new Error(`unknown tool: ${tool}`)
 }
