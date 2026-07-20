@@ -91,6 +91,10 @@ export function createCanvasClient(relayUrl: string, opts: { timeoutMs?: number;
       abandon()
       throw e instanceof Error ? e : new Error('relay connection failed')
     }
+    // The timer runs independently of the gate wait, so the caller may have already
+    // timed out (or been closed) while we were parked here. Sending now would replay
+    // an abandoned request onto the reconnected socket — a duplicate canvas write.
+    if (!pending.has(requestId)) return result // already rejected; preserve that rejection
     try {
       ws.send(JSON.stringify({ requestId, tool, params }))
     } catch {

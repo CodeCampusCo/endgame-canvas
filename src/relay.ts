@@ -42,10 +42,17 @@ export function startRelay(port = 9910, opts: { allowedOrigins?: string[] } = {}
           // Newest browser wins. If an old one is still around, tear it down cleanly
           // (evict its pending, then close it) so it can't linger as a phantom that
           // silently swallows routed messages.
-          if (browserSocket && browserSocket.readyState === WebSocket.OPEN) {
+          // Always tear down regardless of readyState: a CLOSING old socket would
+          // otherwise be overwritten here and its later close event would match
+          // neither branch, orphaning its pending entries.
+          if (browserSocket) {
             const old = browserSocket
             dropBrowser('browser disconnected')
-            old.close()
+            try {
+              old.close()
+            } catch {
+              // already closing/closed — nothing to do
+            }
           }
           browserSocket = ws
         }

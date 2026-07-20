@@ -116,6 +116,34 @@ test('browser replace evicts the old browser\'s in-flight pending', async () => 
   browserA.close(); browserB.close(); mcp.close(); s.stop()
 })
 
+test('adopting a new browser while the old one is closing/gone still evicts its pending', async () => {
+  const s = startRelay(0)
+  const browserA = await connect(s.port!, 'browser')
+  browserA.onmessage = () => {} // receives but never replies
+  const mcp = await connect(s.port!, 'mcp')
+  const p = nextMsg(mcp)
+  mcp.send(JSON.stringify({ requestId: 'r1', tool: 'read_canvas' }))
+  await new Promise((r) => setTimeout(r, 20))
+
+  // A vanishes abruptly (no clean close frame) and B is adopted right after: whichever
+  // of the two teardown paths runs, r1 must be evicted — never orphaned in the map.
+  ;(browserA as any).terminate()
+  const browserB = await connect(s.port!, 'browser')
+  browserB.onmessage = (e) => {
+    const req = JSON.parse(e.data as string)
+    browserB.send(JSON.stringify({ requestId: req.requestId, ok: true, result: { via: 'B' } }))
+  }
+  const t0 = Date.now()
+  expect(await p).toEqual({ requestId: 'r1', ok: false, error: 'browser disconnected' })
+  expect(Date.now() - t0).toBeLessThan(500) // promptly, not after a client timeout
+
+  // B is fully adopted afterwards
+  const p2 = nextMsg(mcp)
+  mcp.send(JSON.stringify({ requestId: 'r2', tool: 'get_snapshot' }))
+  expect(await p2).toEqual({ requestId: 'r2', ok: true, result: { via: 'B' } })
+  browserB.close(); mcp.close(); s.stop()
+})
+
 // --- Item 4: malformed frames are ignored, not fatal ---
 
 test('malformed frame is ignored → relay survives, next valid request round-trips', async () => {
