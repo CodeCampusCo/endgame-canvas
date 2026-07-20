@@ -47,4 +47,6 @@ tools report page space; shape `x`/`y` are parent-local).
 
 Bun (runtime / package manager / test) · tldraw + React + Vite (browser app) ·
 `@modelcontextprotocol/sdk` (stdio MCP) · native `Bun.serve` WebSocket relay. The MCP server
-runs as `bun src/server.ts` — no build step.
+runs as `bun src/server.ts` — no build step. `bun run start` (`scripts/dev.ts`) launches the
+relay + Vite together in one terminal, auto-freeing stale ports; `bun run relay` / `bun run dev`
+still work individually for debugging.
