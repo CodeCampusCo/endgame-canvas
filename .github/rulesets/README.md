@@ -10,6 +10,8 @@ setup steps below.
 - **Pull request required** before merging (external contributions go through a PR), with
   **0 required approvals** — a solo maintainer can still merge their own PRs (merging isn't
   approving), and there's no lock-out.
+- **All review threads must be resolved** before merging — nothing merges with an open review
+  conversation (the review bots' threads must be resolved or replied-to first).
 - **Status check `check` must pass** — the `check` job in `.github/workflows/ci.yml`
   (install + test + tsc + build). Non-strict, so a branch doesn't have to be up to date first.
 - **No linear-history / signed-commit requirement** — merge commits and unsigned commits are
