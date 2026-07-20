@@ -73,18 +73,68 @@ test('mcp client reconnects after a relay restart on the same port', async () =>
   client.close(); browser2.close(); s2.stop()
 })
 
-test('client.close() stops reconnection (onclose does not schedule a retry)', async () => {
+test('call issued while the relay is down succeeds after the client reconnects', async () => {
+  const PORT = 23000 + Math.floor(Math.random() * 2000)
+  const s1 = startRelay(PORT)
+  const browser1 = await fakeBrowser(PORT, (req) => ({ ok: true, result: { echoed: req.tool } }))
+  const client = createCanvasClient(`ws://localhost:${PORT}/?role=mcp`, { timeoutMs: 5000, backoffMs: 200 })
+  expect(await client.call('get_snapshot', {})).toEqual({ echoed: 'get_snapshot' })
+
+  browser1.close(); s1.stop(true)
+  await new Promise((r) => setTimeout(r, 20)) // let onclose install the fresh pending gate
+
+  // issued WHILE DOWN: must be held at the gate, not fired into the closed socket
+  const inFlight = client.call('read_canvas', {})
+
+  const s2 = startRelay(PORT)
+  const browser2 = await fakeBrowser(PORT, (req) => ({ ok: true, result: { echoed2: req.tool } }))
+  expect(await inFlight).toEqual({ echoed2: 'read_canvas' })
+
+  client.close(); browser2.close(); s2.stop()
+})
+
+test('client.close() stops reconnection and fails later calls fast', async () => {
   const PORT = 21000 + Math.floor(Math.random() * 2000)
   const s = startRelay(PORT)
   const browser = await fakeBrowser(PORT, (req) => ({ ok: true, result: { echoed: req.tool } }))
-  const client = createCanvasClient(`ws://localhost:${PORT}/?role=mcp`, { timeoutMs: 500, backoffMs: 40 })
+  const client = createCanvasClient(`ws://localhost:${PORT}/?role=mcp`, { timeoutMs: 5000, backoffMs: 40 })
   expect(await client.call('get_snapshot', {})).toEqual({ echoed: 'get_snapshot' })
   client.close()
   browser.close(); s.stop(true)
-  // if close() did not set the closed flag, a reconnect would fire ~40ms later and keep the loop alive
-  await new Promise((r) => setTimeout(r, 120))
-  // reaching here without a dangling reconnect loop is the assertion; a leaked timer would keep retrying a dead port
-  expect(true).toBe(true)
+
+  // a listener on the same port counts any reconnect the closed client attempts
+  let attempts = 0
+  const probe = Bun.serve({
+    port: PORT,
+    fetch(req, server) {
+      attempts++
+      if (server.upgrade(req)) return
+      return new Response('websocket only', { status: 426 })
+    },
+    websocket: { message() {} },
+  })
+  await new Promise((r) => setTimeout(r, 200)) // ~5 backoff windows
+  expect(attempts).toBe(0)
+
+  // and a call after close() rejects immediately — it must not wait out timeoutMs
+  const t0 = Date.now()
+  await expect(client.call('read_canvas', {})).rejects.toThrow('client closed')
+  expect(Date.now() - t0).toBeLessThan(200)
+
+  probe.stop(true)
+})
+
+test('close() rejects in-flight calls instead of letting them time out', async () => {
+  const s = startRelay(0)
+  const browser = await fakeBrowser(s.port, () => undefined) // never replies
+  const client = createCanvasClient(`ws://localhost:${s.port}/?role=mcp`, { timeoutMs: 5000 })
+  const inFlight = client.call('read_canvas', {})
+  await new Promise((r) => setTimeout(r, 20)) // let it reach the relay
+  const t0 = Date.now()
+  client.close()
+  await expect(inFlight).rejects.toThrow('relay disconnected')
+  expect(Date.now() - t0).toBeLessThan(200)
+  browser.close(); s.stop()
 })
 
 // --- dispatch map: one handler per tool, centralized unknown/error handling ---

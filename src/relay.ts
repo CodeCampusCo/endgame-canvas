@@ -67,7 +67,9 @@ export function startRelay(port = 9910, opts: { allowedOrigins?: string[] } = {}
           }
           pending.set(msg.requestId, ws)
           browserSocket.send(JSON.stringify(msg))
-        } else if (ws.data.role === 'browser') {
+        } else if (ws.data.role === 'browser' && ws === browserSocket) {
+          // Only the CURRENT browser may answer — an evicted phantom must not
+          // deliver a reply between being replaced and being closed.
           const caller = pending.get(msg.requestId)
           pending.delete(msg.requestId)
           caller?.send(JSON.stringify(msg))
