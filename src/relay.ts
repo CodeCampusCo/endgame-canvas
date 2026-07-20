@@ -49,7 +49,10 @@ export function startRelay(port = 9910, opts: { allowedOrigins?: string[] } = {}
             const old = browserSocket
             dropBrowser('browser disconnected')
             try {
-              old.close()
+              // 4001: app-defined code the browser client uses to distinguish
+              // "you were superseded" (don't reconnect) from an ordinary/relay-down
+              // close (do reconnect).
+              old.close(4001, 'superseded by a newer browser')
             } catch {
               // already closing/closed — nothing to do
             }

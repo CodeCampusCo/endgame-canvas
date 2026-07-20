@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Tldraw, type Editor, type TLShape, type TLShapeId, type IndexKey, toRichText, createShapeId, getArrowBindings, getIndices, PageRecordType } from 'tldraw'
 import 'tldraw/tldraw.css'
 import { createRoot } from 'react-dom/client'
@@ -447,7 +448,11 @@ async function runTool(editor: Editor, tool: string, params: any) {
   throw new Error(`unknown tool: ${tool}`)
 }
 
-function connectRelay(editor: Editor) {
+// 4001: the relay's app-defined code for "a newer browser took over" (see src/relay.ts).
+// Every other close code (relay restarting, network blip, ordinary close) still retries.
+const SUPERSEDED_CLOSE_CODE = 4001
+
+function connectRelay(editor: Editor, onSuperseded: () => void) {
   const ws = new WebSocket(RELAY_URL)
   ws.onmessage = async (e) => {
     const { requestId, tool, params } = JSON.parse(e.data as string)
@@ -458,13 +463,44 @@ function connectRelay(editor: Editor) {
       ws.send(JSON.stringify({ requestId, ok: false, error: String(err?.message ?? err) }))
     }
   }
-  ws.onclose = () => setTimeout(() => connectRelay(editor), 1000)
+  ws.onclose = (e) => {
+    if (e.code === SUPERSEDED_CLOSE_CODE) {
+      onSuperseded()
+      return
+    }
+    setTimeout(() => connectRelay(editor, onSuperseded), 1000)
+  }
+}
+
+function SupersededBanner() {
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 12,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 10000,
+        background: '#1d1d1d',
+        color: '#fff',
+        padding: '8px 16px',
+        borderRadius: 8,
+        fontSize: 13,
+        fontFamily: 'sans-serif',
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
+      }}
+    >
+      Another tab took control of this canvas. Reload this tab to use it here.
+    </div>
+  )
 }
 
 function App() {
+  const [superseded, setSuperseded] = useState(false)
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
-      <Tldraw persistenceKey="endgame-canvas" onMount={connectRelay} />
+      {superseded && <SupersededBanner />}
+      <Tldraw persistenceKey="endgame-canvas" onMount={(editor) => connectRelay(editor, () => setSuperseded(true))} />
     </div>
   )
 }

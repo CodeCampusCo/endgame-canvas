@@ -144,6 +144,26 @@ test('adopting a new browser while the old one is closing/gone still evicts its 
   browserB.close(); mcp.close(); s.stop()
 })
 
+test('new browser connects → old browser is closed with code 4001 (superseded), new one is adopted', async () => {
+  const s = startRelay(0)
+  const browserA = await connect(s.port!, 'browser')
+  const closeA = new Promise<CloseEvent>((res) => { browserA.onclose = res })
+  const browserB = await connect(s.port!, 'browser')
+  browserB.onmessage = (e) => {
+    const req = JSON.parse(e.data as string)
+    browserB.send(JSON.stringify({ requestId: req.requestId, ok: true, result: { via: 'B' } }))
+  }
+  const closeEvent = await closeA
+  expect(closeEvent.code).toBe(4001)
+
+  // B is fully adopted: a routed request reaches it and round-trips.
+  const mcp = await connect(s.port!, 'mcp')
+  const p = nextMsg(mcp)
+  mcp.send(JSON.stringify({ requestId: 'r1', tool: 'get_snapshot' }))
+  expect(await p).toEqual({ requestId: 'r1', ok: true, result: { via: 'B' } })
+  browserB.close(); mcp.close(); s.stop()
+})
+
 // --- Item 4: malformed frames are ignored, not fatal ---
 
 test('malformed frame is ignored → relay survives, next valid request round-trips', async () => {
