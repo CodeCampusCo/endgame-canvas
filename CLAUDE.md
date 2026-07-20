@@ -35,8 +35,9 @@ is supported: the newest connection wins, and the relay closes the superseded on
 
 One `TOOL_DEFS` entry + one handler in `createDispatcher` (`src/server.ts`) + one branch in
 `runTool` (`browser/src/main.tsx`) + a handler unit test using a fake `call`. Browser-side
-logic has no unit-test harness — verify it at runtime with `scripts/probe.ts`, which opens a
-fresh connection to the relay and drives the live editor without restarting the MCP server.
+logic has no unit-test harness — verify it at runtime against the live canvas with a short
+script that imports `createCanvasClient`/`createDispatcher` from `src/server.ts` and drives the
+editor over the relay (a fresh connection, so no MCP-server restart needed).
 
 Prefer tldraw's built-ins over hand-rolled equivalents: `editor.run()` to make a multi-shape
 tool one atomic transaction and one undo step, `getSortedChildIdsForParent` for frame children,

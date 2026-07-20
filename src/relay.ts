@@ -26,7 +26,7 @@ export function startRelay(port = 9910, opts: { allowedOrigins?: string[] } = {}
     port,
     fetch(req, server) {
       // Origin allowlist: browsers send an Origin header; trusted local non-browser
-      // clients (the MCP server, the probe) send none. Absent → allow; present but
+      // clients (e.g. the MCP server) send none. Absent → allow; present but
       // not allowlisted → reject before upgrading.
       const origin = req.headers.get('origin')
       if (origin !== null && !allowedOrigins.includes(origin)) {
