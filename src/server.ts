@@ -230,6 +230,31 @@ const TOOL_DEFS = [
     },
   },
   {
+    name: 'create_page',
+    description: 'Create a new page on the canvas — a separate board/topic with its own shapes.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'list_pages',
+    description: 'List every page on the canvas with id, name, and whether it is the current page.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'switch_page',
+    description: 'Switch the current page — re-scopes read tools (get_snapshot, read_canvas, list_frames, read_frame) to it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Page name, or a page:... id to disambiguate.' },
+      },
+      required: ['name'],
+    },
+  },
+  {
     name: 'export_image',
     description:
       'Export the whole canvas, a named frame, or the current selection to a PNG or SVG file on disk — for embedding diagrams into documents.',
@@ -305,6 +330,15 @@ export function createDispatcher(call: CanvasCall) {
     },
     async select(args) {
       return asText(JSON.stringify(await call('select', args)))
+    },
+    async create_page(args) {
+      return asText(JSON.stringify(await call('create_page', args)))
+    },
+    async list_pages() {
+      return asText(JSON.stringify(await call('list_pages', {}), null, 2))
+    },
+    async switch_page(args) {
+      return asText(JSON.stringify(await call('switch_page', args)))
     },
     async export_image(args) {
       const { target, format, path, name } = args

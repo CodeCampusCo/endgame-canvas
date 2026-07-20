@@ -400,9 +400,48 @@ test('dispatch export_image → resolves a relative path against cwd', async () 
   try {
     const r = await dispatch('export_image', { target: 'canvas', format: 'png', path: rel })
     expect(r.isError).toBeUndefined()
-    const resolved = JSON.parse(r.content[0].text)
-    expect(resolved.path).toBe(resolve(rel))
+    const parsed = JSON.parse(r.content[0].text)
+    expect(parsed.path).toBe(resolve(rel))
   } finally {
     await unlink(rel)
   }
+})
+
+// --- Family F: multi-page ---
+
+test('dispatch create_page → forwards name, returns id as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'page:board2' }
+  })
+  const args = { name: 'Board2' }
+  expect(await dispatch('create_page', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'page:board2' }) }],
+  })
+  expect(seen).toEqual({ tool: 'create_page', params: args })
+})
+
+test('dispatch list_pages → pretty JSON text', async () => {
+  const pages = [
+    { id: 'page:page', name: 'Page 1', current: true },
+    { id: 'page:board2', name: 'Board2', current: false },
+  ]
+  const dispatch = createDispatcher(async () => pages)
+  expect(await dispatch('list_pages', {})).toEqual({
+    content: [{ type: 'text', text: JSON.stringify(pages, null, 2) }],
+  })
+})
+
+test('dispatch switch_page → forwards name, returns ok as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { ok: true }
+  })
+  const args = { name: 'Board2' }
+  expect(await dispatch('switch_page', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ ok: true }) }],
+  })
+  expect(seen).toEqual({ tool: 'switch_page', params: args })
 })

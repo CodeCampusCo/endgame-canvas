@@ -75,6 +75,16 @@ if (cmd === 'create') {
 } else if (cmd === 'select') {
   const ids = process.argv.slice(3)
   console.log(await client.call('select', { ids }))
+} else if (cmd === 'create-page') {
+  const name = process.argv[3]
+  if (!name) throw new Error('usage: create-page <name>')
+  console.log(await client.call('create_page', { name }))
+} else if (cmd === 'list-pages') {
+  console.log(JSON.stringify(await client.call('list_pages', {}), null, 2))
+} else if (cmd === 'switch-page') {
+  const name = process.argv[3]
+  if (!name) throw new Error('usage: switch-page <name>')
+  console.log(await client.call('switch_page', { name }))
 } else if (cmd === 'export-image') {
   // usage: export-image <canvas|frame|selection> <png|svg> <path> [frameName]
   // Goes through the same dispatcher the real MCP server uses, so this
