@@ -86,10 +86,10 @@ async function runTool(editor: Editor, tool: string, params: any) {
         const b = getArrowBindings(editor, arrow)
         return { arrowId: arrow.id, start: b.start?.toId ?? null, end: b.end?.toId ?? null }
       })
-    if (children.length === 0) return { url: null, width: 0, height: 0, shapes: [], bindings: [] }
+    if (children.length === 0) return { url: null, width: 0, height: 0, shapes: [], bindings: [], frameId: frame.id }
     const { blob, width, height } = await editor.toImage(children, { format: 'png', background: true })
     const url = await blobToDataUrl(blob)
-    return { url, width, height, shapes: children.map((s) => shapeSnapshot(editor, s)), bindings }
+    return { url, width, height, shapes: children.map((s) => shapeSnapshot(editor, s)), bindings, frameId: frame.id }
   }
   if (tool === 'create_shape') {
     const { type, x, y, text } = params
@@ -224,7 +224,8 @@ async function runTool(editor: Editor, tool: string, params: any) {
     const frame = findFrame(editor, params.name)
     if (!frame) throw new Error('frame not found: ' + params.name)
     const bounds = editor.getShapePageBounds(frame)
-    editor.zoomToBounds(bounds!)
+    if (!bounds) throw new Error('frame has no bounds: ' + params.name)
+    editor.zoomToBounds(bounds)
     return { ok: true }
   }
   if (tool === 'select') {
