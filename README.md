@@ -1,5 +1,7 @@
 # endgame-canvas
 
+[![CI](https://github.com/CodeCampusCo/endgame-canvas/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeCampusCo/endgame-canvas/actions/workflows/ci.yml)
+
 A localhost [tldraw](https://tldraw.dev) canvas exposed over **MCP** — a shared visual medium
 where an AI agent and a human draw and read the same canvas to align understanding and produce
 diagrams, right from a chat.
