@@ -1,125 +1,110 @@
 # endgame-canvas
 
 A localhost [tldraw](https://tldraw.dev) canvas exposed over **MCP** — a shared visual medium
-where agents (and, optionally, a human) draw and read a canvas to align understanding and
-produce diagrams. The drawing faculty of the endgame dev-office.
+where an AI agent and a human draw and read the same canvas to align understanding and produce
+diagrams, right from a chat.
 
-> **Status: spike — kill criterion PASSED.** This repo proves one thing: an agent can read a
-> human's *freehand* strokes off a live canvas. It did — reading a scribbled word, identifying
-> which shape a freehand circle enclosed, and what a freehand arrow pointed at, all from a
-> single `read_canvas` call. See [`docs/specs/2026-07-19-design.md`](docs/specs/2026-07-19-design.md)
-> for the kill criterion and [`docs/superpowers/specs/2026-07-19-endgame-canvas-spike-impl-design.md`](docs/superpowers/specs/2026-07-19-endgame-canvas-spike-impl-design.md)
-> for the as-built implementation design.
+![Architecture of endgame-canvas](docs/hero.png)
 
-## The idea
+> **The diagram above was not made in a design tool.** An AI agent drew it directly on the
+> canvas using endgame-canvas's own MCP tools (`create_frame`, `create_flowchart`,
+> `create_shape`, `create_arrow`, `create_note`, `export_image`), then exported it to the PNG
+> you're looking at — from this prompt:
+>
+> > *"Draw this system's architecture on the canvas as a top-down flow: an AI agent makes a
+> > tool call to the MCP server, which forwards it by requestId to the WebSocket relay, which
+> > runs it on the browser's tldraw editor. To the side, show the agent exporting the canvas to
+> > a PNG/SVG file, and a human drawing and reading the same canvas. Caption it: the browser is
+> > the source of truth — the server holds no canvas state."*
+>
+> The boxes are blue because that's the agent's attribution colour — the canvas colours each
+> agent's shapes so a human can see, at a glance, who drew what.
 
-The **browser tldraw editor is the source of truth**. The MCP server holds *no* canvas state —
-every tool is a command the browser runs on the live `editor`, correlated by `requestId`. This
-is the only topology where a human's freehand strokes are readable, because every read
-round-trips to the live editor (a screenshot the model can actually see), rather than a
-server-side shadow model that never sees what the human draws.
+## Why
 
-```
-                        Terminal: bun run dev  (Vite serves the browser app)
+Chat is linear; understanding often isn't. endgame-canvas gives an agent a real 2D surface it
+can both **read** and **draw on** — including a human's freehand strokes. The agent can read a
+scribbled note, tell which shape a hand-drawn circle encloses, connect boxes with bound arrows,
+lay out a flowchart in one call, and export the result to a file you can drop into a document.
 
-Claude Code ──spawn──► bun src/server.ts ──(WS client, role=mcp)──┐
-                        stdio MCP + WS client                     ▼
-                                                          bun src/relay.ts   ── the durable hub
-                                                          (Bun.serve WS :9910)
-                                                                     ▲
-Browser tab (localhost:5173) ──────────(WS client, role=browser)─────┘
-   <Tldraw> = SOURCE OF TRUTH
-```
+## What it can do
 
-- **relay** is a long-lived hub; the browser and every MCP server attach to it as WS clients.
-- A request `{ requestId, tool, params }` is routed to the browser; the response
-  `{ requestId, ok, result | error }` is routed back **to the calling client only — never
-  broadcast**. `requestId` is the glue; it is what lets many agents share one canvas later
-  (Mode B) without responses crossing wires.
-- Two guards keep a tool call from hanging: no browser connected → immediate error; browser
-  silent for 10 s (or the relay socket never opens) → `canvas timeout`.
+21 MCP tools over one canvas:
 
-## The three tools
+- **Read** — `read_canvas` (a raster the agent can read freehand off), `get_snapshot` (every
+  shape with position + text), `read_frame` (a frame cropped to a raster **plus** its shapes and
+  their arrow bindings).
+- **Draw** — `create_shape` (rectangle / ellipse / text + triangle, diamond, star, hexagon,
+  cloud, x-box, check-box), `create_line`, `create_highlight`, `create_arrow` (bound to both
+  shapes), `create_note`.
+- **Frames** — `create_frame`, `list_frames` — a named frame is the shared reference unit
+  ("what's in frame X?").
+- **Edit** — `update_shape` (move / resize / relabel / recolour), `delete_shape`.
+- **Navigate** — `zoom_to_frame`, `select` — point the human's view and highlight shapes.
+- **Compose** — `create_flowchart` (nodes + bound arrows + tree/grid layout in one call),
+  `create_connected`.
+- **Pages** — `create_page`, `list_pages`, `switch_page`.
+- **Export** — `export_image` writes a PNG or SVG **to disk**, so diagrams land in your docs.
+- **Attribution** — `list_agents`; set `CANVAS_AGENT` and an agent's shapes take a distinct
+  colour.
 
-| tool | what it does | editor call |
-|---|---|---|
-| `read_canvas` | render the whole canvas to a PNG (→ MCP image content) so the agent can read freehand | `editor.toImage(getCurrentPageShapes(), {format:'png', background:true})` → data URL |
-| `get_snapshot` | list every shape: id, type, position, size, plain text | `getCurrentPageShapes()` + `getShapeUtil(s).getText(s)` |
-| `create_shape` | draw a rectangle / ellipse / text back onto the canvas | `createShape({ id, type, x, y, props })` with `toRichText` |
+## Quickstart
 
-Freehand pen strokes are stored as tldraw `draw` shapes (vector polylines) — legible only via
-the **raster** path (`read_canvas`), not structurally. That is the whole reason `read_canvas`
-exists; `get_snapshot` is for the clean shapes a party *places*.
-
-## Stack
-
-Bun (runtime / package manager / test — no build step for the server) · native `Bun.serve`
-WebSocket relay (no `ws` dependency) · tldraw + React + Vite (browser app) ·
-`@modelcontextprotocol/sdk` (stdio MCP).
-
-## Getting started
+Requires [Bun](https://bun.sh).
 
 ```bash
 bun install
+bun run start      # runs the WS relay (:9910) + Vite (:5173) in one terminal
 ```
 
-Run the three pieces (relay and Vite are long-lived — leave them running):
+Open **http://localhost:5173** and leave the tab open — that tab is the canvas.
 
-```bash
-bun run relay      # WS hub on ws://localhost:9910
-bun run dev        # Vite dev server on http://localhost:5173
+Then register the MCP server with your client. For Claude Desktop / Claude Code, add to the MCP
+config:
+
+```json
+{
+  "mcpServers": {
+    "endgame-canvas": {
+      "command": "bun",
+      "args": ["/absolute/path/to/endgame-canvas/src/server.ts"],
+      "env": { "CANVAS_AGENT": "claude" }
+    }
+  }
+}
 ```
 
-Open **http://localhost:5173/** in a browser and leave the tab open — the canvas connects to
-the relay automatically (and auto-reconnects if the relay restarts).
+`CANVAS_AGENT` is optional — set it to give this agent a distinct colour on the canvas; omit it
+to draw in the default style. Now ask the agent to read or draw, and watch the tab.
 
-### Development
+## How it works
 
-`bun run start` runs the relay and Vite together in one terminal — it auto-frees any stale
-process still holding :9910 or :5173, prefixes each child's output (`[relay]` / `[vite]`), and
-shuts both down cleanly on Ctrl-C. The individual `bun run relay` / `bun run dev` still work for
-running or debugging one piece on its own.
+The **browser tldraw editor is the source of truth.** The MCP server holds no canvas state —
+every tool is a command the browser runs on the live editor, correlated by `requestId`. That is
+what makes reading a human's freehand strokes possible: the strokes live in the browser, and the
+agent asks the browser about them. `export_image` is the one thing that lands server-side — the
+browser renders the image and the server writes the file.
 
-Drive the canvas without MCP, to verify the loop:
+The WS relay (`:9910`) routes each response back to its caller only, never broadcasting. It is
+hardened for real use: it rejects in-flight calls when a socket drops, reconnects with backoff so
+a relay restart doesn't kill the agent, guards against malformed frames, and enforces a
+single-browser policy (a new tab takes over; the old one is told, via close code `4001`, to stop
+reconnecting). The canvas supports **one human and one agent, one browser.**
 
-```bash
-bun scripts/probe.ts create   # draws a labelled rectangle on the canvas
-bun scripts/probe.ts          # get_snapshot — lists the shapes
-bun scripts/probe.ts read     # read_canvas — reports the PNG size
-```
+## Development
 
-Register as an MCP server for an agent to use directly:
+`bun run start` is the one-command dev stack (relay + Vite, auto-freeing stale ports, clean
+Ctrl-C). The pieces also run on their own: `bun run relay`, `bun run dev`, `bun run server`.
+`bun test` runs the suite.
 
-```bash
-claude mcp add endgame-canvas -- bun /absolute/path/to/endgame-canvas/src/server.ts
-# then restart so the three tools load
-```
+Adding a tool is one `TOOL_DEFS` entry + one handler in `createDispatcher` (`src/server.ts`) +
+one branch in `runTool` (`browser/src/main.tsx`) + a handler unit test.
 
-Run the tests:
+## Stack
 
-```bash
-bun test           # relay routing + MCP client (timeout, no-browser, unreachable)
-```
+Bun (runtime / package manager / test) · tldraw + React + Vite (browser app) ·
+`@modelcontextprotocol/sdk` (stdio MCP) · native `Bun.serve` WebSocket relay. No build step.
 
-## Project structure
+## License
 
-```
-src/                    Bun backend
-  relay.ts              Bun.serve WS hub — role-aware, requestId routing, never broadcast
-  server.ts             stdio MCP server + WS client to the relay; the three tools
-  relay.test.ts  server.test.ts
-browser/                Vite + React + tldraw frontend
-  index.html
-  src/main.tsx          <Tldraw persistenceKey> + onMount → WS client → runs tools on editor
-scripts/
-  probe.ts              drives the browser through the relay for manual verification
-vite.config.ts          root: 'browser'
-docs/                   design specs
-```
-
-## Deferred (do not build until it earns its place)
-
-connect / flowchart / frame drawing, export-to-file, HTTP transport + turn-token, multi-agent
-orchestration (Mode B), per-agent attribution colours, structured-read enrichment. The first
-follow-up task is the relay socket-lifecycle pass (reject + evict pending calls on
-browser/mcp disconnect) plus a server-side reconnect.
+[MIT](LICENSE).
