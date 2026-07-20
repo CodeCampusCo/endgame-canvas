@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
+    branches: [master]
   pull_request:
 
-# One run per branch: a new push cancels the previous in-progress run.
+# One run per ref: a new push cancels the previous in-progress run.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
