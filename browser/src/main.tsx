@@ -237,7 +237,6 @@ async function runTool(editor: Editor, tool: string, params: any, agent?: string
     return { id }
   }
   if (tool === 'list_frames') {
-    const shapes = editor.getCurrentPageShapes()
     return getFrames(editor).map((s) => {
       const b = editor.getShapePageBounds(s)
       return {
@@ -247,14 +246,17 @@ async function runTool(editor: Editor, tool: string, params: any, agent?: string
         y: b?.y,
         w: b?.w,
         h: b?.h,
-        shapeCount: shapes.filter((c) => c.parentId === s.id).length,
+        shapeCount: editor.getSortedChildIdsForParent(s.id).length,
       }
     })
   }
   if (tool === 'read_frame') {
     const frame = findFrame(editor, params.name)
     if (!frame) throw new Error('frame not found: ' + params.name)
-    const children = editor.getCurrentPageShapes().filter((s) => s.parentId === frame.id)
+    const children = editor
+      .getSortedChildIdsForParent(frame.id)
+      .map((id) => editor.getShape(id))
+      .filter((s): s is TLShape => s != null)
     const bindings = children
       .filter((s): s is Extract<TLShape, { type: 'arrow' }> => s.type === 'arrow')
       .map((arrow) => {
@@ -336,7 +338,11 @@ async function runTool(editor: Editor, tool: string, params: any, agent?: string
   }
   if (tool === 'create_arrow') {
     const { fromId, toId, text } = params
-    return { id: bindArrow(editor, fromId, toId, text, color) }
+    let id!: TLShapeId
+    editor.run(() => {
+      id = bindArrow(editor, fromId, toId, text, color)
+    })
+    return { id }
   }
   if (tool === 'create_note') {
     const { x, y, text } = params
@@ -430,6 +436,11 @@ async function runTool(editor: Editor, tool: string, params: any, agent?: string
       shapes = editor.getCurrentPageShapes()
     }
     if (shapes.length === 0) throw new Error('nothing to export')
+    if (format === 'svg') {
+      const r = await editor.getSvgString(shapes, { background: true })
+      if (!r) throw new Error('svg export failed')
+      return { svg: r.svg, width: r.width, height: r.height }
+    }
     const { blob, width, height } = await editor.toImage(shapes, { format, background: true })
     const url = await blobToDataUrl(blob)
     return { url, width, height }
@@ -438,39 +449,41 @@ async function runTool(editor: Editor, tool: string, params: any, agent?: string
     const { nodes, edges, layout = 'tree', frame, x = 100, y = 100 } = params
     const positions = flowchartPositions(nodes, edges, layout, x, y)
 
-    if (frame) {
-      let minX = Infinity
-      let minY = Infinity
-      let maxX = -Infinity
-      let maxY = -Infinity
-      for (const { px, py } of positions.values()) {
-        minX = Math.min(minX, px)
-        minY = Math.min(minY, py)
-        maxX = Math.max(maxX, px + FLOWCHART_NODE_W)
-        maxY = Math.max(maxY, py + FLOWCHART_NODE_H)
-      }
-      const pad = 40
-      editor.createShape({
-        id: createShapeId(),
-        type: 'frame',
-        x: minX - pad,
-        y: minY - pad,
-        props: { w: maxX - minX + pad * 2, h: maxY - minY + pad * 2, name: frame },
-      })
-    }
-
     const ids: Record<string, TLShapeId> = {}
-    for (const node of nodes) {
-      const { px, py } = positions.get(node.key)!
-      ids[node.key] = createGeoNode(editor, node.shape ?? 'rectangle', px, py, node.text, FLOWCHART_NODE_W, FLOWCHART_NODE_H, color)
-    }
-
     const arrowIds: string[] = []
-    for (const edge of edges) {
-      if (!(edge.from in ids)) throw new Error('unknown node key in edge: ' + edge.from)
-      if (!(edge.to in ids)) throw new Error('unknown node key in edge: ' + edge.to)
-      arrowIds.push(bindArrow(editor, ids[edge.from], ids[edge.to], edge.text, color))
-    }
+    editor.run(() => {
+      if (frame) {
+        let minX = Infinity
+        let minY = Infinity
+        let maxX = -Infinity
+        let maxY = -Infinity
+        for (const { px, py } of positions.values()) {
+          minX = Math.min(minX, px)
+          minY = Math.min(minY, py)
+          maxX = Math.max(maxX, px + FLOWCHART_NODE_W)
+          maxY = Math.max(maxY, py + FLOWCHART_NODE_H)
+        }
+        const pad = 40
+        editor.createShape({
+          id: createShapeId(),
+          type: 'frame',
+          x: minX - pad,
+          y: minY - pad,
+          props: { w: maxX - minX + pad * 2, h: maxY - minY + pad * 2, name: frame },
+        })
+      }
+
+      for (const node of nodes) {
+        const { px, py } = positions.get(node.key)!
+        ids[node.key] = createGeoNode(editor, node.shape ?? 'rectangle', px, py, node.text, FLOWCHART_NODE_W, FLOWCHART_NODE_H, color)
+      }
+
+      for (const edge of edges) {
+        if (!(edge.from in ids)) throw new Error('unknown node key in edge: ' + edge.from)
+        if (!(edge.to in ids)) throw new Error('unknown node key in edge: ' + edge.to)
+        arrowIds.push(bindArrow(editor, ids[edge.from], ids[edge.to], edge.text, color))
+      }
+    })
 
     return { ids, arrowIds }
   }
@@ -482,8 +495,12 @@ async function runTool(editor: Editor, tool: string, params: any, agent?: string
     const GAP = 80
     const nx = direction === 'down' ? b.x : b.x + b.w + GAP
     const ny = direction === 'down' ? b.y + b.h + GAP : b.y
-    const nodeId = createGeoNode(editor, shape, nx, ny, text, FLOWCHART_NODE_W, FLOWCHART_NODE_H, color)
-    const arrowId = bindArrow(editor, fromId, nodeId, undefined, color)
+    let nodeId!: TLShapeId
+    let arrowId!: TLShapeId
+    editor.run(() => {
+      nodeId = createGeoNode(editor, shape, nx, ny, text, FLOWCHART_NODE_W, FLOWCHART_NODE_H, color)
+      arrowId = bindArrow(editor, fromId, nodeId, undefined, color)
+    })
     return { nodeId, arrowId }
   }
   if (tool === 'list_agents') {

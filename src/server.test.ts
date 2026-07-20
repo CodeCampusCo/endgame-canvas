@@ -485,6 +485,20 @@ test('dispatch export_image with svg → round-trips svg text through the same d
   }
 })
 
+test('dispatch export_image with svg → writes the svg text directly, no base64 round trip', async () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"/>'
+  const dispatch = createDispatcher(async () => ({ svg, width: 10, height: 10 }))
+  const path = tempPath('svg')
+  try {
+    expect(await dispatch('export_image', { target: 'canvas', format: 'svg', path })).toEqual({
+      content: [{ type: 'text', text: JSON.stringify({ path, width: 10, height: 10 }) }],
+    })
+    expect(await Bun.file(path).text()).toBe(svg)
+  } finally {
+    await unlink(path)
+  }
+})
+
 test('dispatch export_image → forwards target/name/format to the canvas call, path stays server-side', async () => {
   let seen: any
   const dispatch = createDispatcher(async (tool, params) => {
