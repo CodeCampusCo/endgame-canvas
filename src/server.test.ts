@@ -645,3 +645,13 @@ test('dispatch create_connected with only fromId/text → still forwards correct
   })
   expect(seen).toEqual({ tool: 'create_connected', params: args })
 })
+
+// --- Milestone 3: per-agent attribution ---
+
+test('dispatch list_agents → pretty JSON text', async () => {
+  const agents = [{ agent: 'alice', color: 'blue' }, { agent: 'bob', color: 'green' }]
+  const dispatch = createDispatcher(async () => agents)
+  expect(await dispatch('list_agents', {})).toEqual({
+    content: [{ type: 'text', text: JSON.stringify(agents, null, 2) }],
+  })
+})

@@ -389,6 +389,11 @@ const TOOL_DEFS = [
     },
   },
   {
+    name: 'list_agents',
+    description: "List every agent the browser has seen since the page loaded, with each agent's assigned colour.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'export_image',
     description:
       'Export the whole canvas, a named frame, or the current selection to a PNG or SVG file on disk — for embedding diagrams into documents.',
@@ -480,6 +485,9 @@ export function createDispatcher(call: CanvasCall) {
     async create_connected(args) {
       return asText(JSON.stringify(await call('create_connected', args)))
     },
+    async list_agents() {
+      return asText(JSON.stringify(await call('list_agents', {}), null, 2))
+    },
     async export_image(args) {
       const { target, format, path, name } = args
       const resolved = resolve(path)
@@ -505,7 +513,12 @@ export function createDispatcher(call: CanvasCall) {
 }
 
 if (import.meta.main) {
-  const client = createCanvasClient('ws://localhost:9910/?role=mcp')
+  // Optional agent identity: unset → connect exactly as before (no `agent` param).
+  const agent = process.env.CANVAS_AGENT
+  const relayUrl = agent
+    ? `ws://localhost:9910/?role=mcp&agent=${encodeURIComponent(agent)}`
+    : 'ws://localhost:9910/?role=mcp'
+  const client = createCanvasClient(relayUrl)
   const server = new Server(
     { name: 'endgame-canvas', version: '0.0.1' },
     { capabilities: { tools: {} } },
