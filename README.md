@@ -73,6 +73,13 @@ bun run dev        # Vite dev server on http://localhost:5173
 Open **http://localhost:5173/** in a browser and leave the tab open — the canvas connects to
 the relay automatically (and auto-reconnects if the relay restarts).
 
+### Development
+
+`bun run start` runs the relay and Vite together in one terminal — it auto-frees any stale
+process still holding :9910 or :5173, prefixes each child's output (`[relay]` / `[vite]`), and
+shuts both down cleanly on Ctrl-C. The individual `bun run relay` / `bun run dev` still work for
+running or debugging one piece on its own.
+
 Drive the canvas without MCP, to verify the loop:
 
 ```bash

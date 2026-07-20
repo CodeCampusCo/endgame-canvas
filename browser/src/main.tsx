@@ -81,7 +81,7 @@ function bindArrow(editor: Editor, fromShapeId: TLShapeId, toShapeId: TLShapeId,
     type: 'arrow',
     x: start?.x ?? 0,
     y: start?.y ?? 0,
-    props: { ...(text ? { text } : {}), ...(color ? { color } : {}) },
+    props: { font: 'mono', dash: 'solid', ...(text ? { text } : {}), ...(color ? { color } : {}) },
   })
   editor.createBinding({
     type: 'arrow',
@@ -115,7 +115,8 @@ function createGeoNode(editor: Editor, geo: string, x: number, y: number, text: 
       richText: toRichText(text ?? ''),
       align: 'middle',
       verticalAlign: 'middle',
-      font: 'draw',
+      font: 'mono',
+      dash: 'solid',
       ...(color ? { color } : {}),
     },
   })
@@ -274,7 +275,7 @@ async function runTool(editor: Editor, tool: string, params: any, agent?: string
     if (type === 'text') {
       editor.createShape({
         id, type: 'text', x, y,
-        props: { richText: toRichText(text ?? ''), ...(color ? { color } : {}) },
+        props: { richText: toRichText(text ?? ''), font: 'mono', ...(color ? { color } : {}) },
       })
     } else {
       editor.createShape({
@@ -289,7 +290,8 @@ async function runTool(editor: Editor, tool: string, params: any, agent?: string
           richText: toRichText(text ?? ''),
           align: 'middle',
           verticalAlign: 'middle',
-          font: 'draw',
+          font: 'mono',
+          dash: 'solid',
           ...(color ? { color } : {}),
         },
       })
@@ -311,7 +313,7 @@ async function runTool(editor: Editor, tool: string, params: any, agent?: string
       type: 'line',
       x: origin.x,
       y: origin.y,
-      props: { points: pointsDict, scale: 1, ...(color ? { color } : {}) },
+      props: { points: pointsDict, scale: 1, dash: 'solid', ...(color ? { color } : {}) },
     })
     return { id }
   }
@@ -349,7 +351,7 @@ async function runTool(editor: Editor, tool: string, params: any, agent?: string
     const id = createShapeId()
     editor.createShape({
       id, type: 'note', x, y,
-      props: { richText: toRichText(text), ...(color ? { color } : {}) },
+      props: { richText: toRichText(text), font: 'mono', ...(color ? { color } : {}) },
     })
     return { id }
   }
