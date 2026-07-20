@@ -5,40 +5,120 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
 
-export function createCanvasClient(relayUrl: string, opts: { timeoutMs?: number } = {}) {
+export function createCanvasClient(relayUrl: string, opts: { timeoutMs?: number; backoffMs?: number } = {}) {
   const timeoutMs = opts.timeoutMs ?? 10000
+  const initialBackoff = opts.backoffMs ?? 500
   const pending = new Map<string, Pending>()
-  const ws = new WebSocket(relayUrl)
-  const ready = new Promise<void>((resolve, reject) => {
-    ws.onopen = () => resolve()
-    ws.onerror = () => reject(new Error('relay connection failed'))
-  })
-  ready.catch(() => {}) // avoid unhandled-rejection noise when no call is in flight
 
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data as string)
-    const p = pending.get(msg.requestId)
-    if (!p) return
-    pending.delete(msg.requestId)
-    clearTimeout(p.timer)
-    if (msg.ok) p.resolve(msg.result)
-    else p.reject(new Error(msg.error))
+  let ws: WebSocket
+  let ready: Promise<void>
+  let openGate!: () => void
+  let failGate!: (e: Error) => void
+  let closed = false
+  let backoff = initialBackoff
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+  // One gate per connection attempt: pending while disconnected, resolved by that
+  // attempt's onopen, rejected by its onerror. A call made during an outage awaits
+  // the pending gate and is sent on the reconnected socket — never into a dead one.
+  function newGate() {
+    ready = new Promise<void>((resolve, reject) => { openGate = resolve; failGate = reject })
+    ready.catch(() => {}) // avoid unhandled-rejection noise when no call is in flight
   }
 
+  function connect() {
+    if (closed) return
+    retryTimer = null
+    ws = new WebSocket(relayUrl)
+    const resolveThis = openGate // this attempt owns the gate current at connect time
+    const rejectThis = failGate
+    ws.onopen = () => { backoff = initialBackoff; resolveThis() } // reset backoff on a good connection
+    ws.onerror = () => rejectThis(new Error('relay connection failed'))
+
+    ws.onmessage = (e) => {
+      let msg: any
+      try {
+        msg = JSON.parse(e.data as string)
+      } catch {
+        return // ignore a malformed frame
+      }
+      const p = pending.get(msg.requestId)
+      if (!p) return
+      pending.delete(msg.requestId)
+      clearTimeout(p.timer)
+      if (msg.ok) p.resolve(msg.result)
+      else p.reject(new Error(msg.error))
+    }
+
+    ws.onclose = () => {
+      if (closed) return // deliberate close() — do not reconnect
+      // The socket dropped (relay restart). Fail every in-flight call, then retry with backoff.
+      for (const [, p] of pending) {
+        clearTimeout(p.timer)
+        p.reject(new Error('relay disconnected'))
+      }
+      pending.clear()
+      // Install a FRESH pending gate before retrying, so calls made during the
+      // backoff window wait for the new socket instead of firing into the dead one
+      // (a send on a CLOSED socket does not throw — it is silently discarded).
+      newGate()
+      retryTimer = setTimeout(connect, backoff)
+      backoff = Math.min(backoff * 2, 5000)
+    }
+  }
+  newGate()
+  connect()
+
   async function call(tool: string, params?: unknown) {
-    await ready
+    if (closed) throw new Error('client closed')
     const requestId = crypto.randomUUID()
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+    let timer!: ReturnType<typeof setTimeout>
+    // The timer starts BEFORE the ready wait, so timeoutMs bounds the whole
+    // operation — a pending gate can never mean an unbounded hang.
+    const result = new Promise((resolve, reject) => {
+      timer = setTimeout(() => {
         pending.delete(requestId)
         reject(new Error('canvas timeout'))
       }, timeoutMs)
       pending.set(requestId, { resolve, reject, timer })
-      ws.send(JSON.stringify({ requestId, tool, params }))
     })
+    result.catch(() => {}) // it can be rejected (drop/close) before we return it — keep that handled
+    const abandon = () => { pending.delete(requestId); clearTimeout(timer) }
+
+    try {
+      await ready // pending during an outage: the call is held until the reconnect opens
+    } catch (e: any) {
+      abandon()
+      throw e instanceof Error ? e : new Error('relay connection failed')
+    }
+    // The timer runs independently of the gate wait, so the caller may have already
+    // timed out (or been closed) while we were parked here. Sending now would replay
+    // an abandoned request onto the reconnected socket — a duplicate canvas write.
+    if (!pending.has(requestId)) return result // already rejected; preserve that rejection
+    try {
+      ws.send(JSON.stringify({ requestId, tool, params }))
+    } catch {
+      abandon()
+      throw new Error('relay send failed')
+    }
+    return result
   }
 
-  return { call, close: () => ws.close() }
+  function close() {
+    if (closed) return
+    closed = true
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+    // Deliberate close: fail in-flight calls now instead of letting them time out.
+    for (const [, p] of pending) {
+      clearTimeout(p.timer)
+      p.reject(new Error('relay disconnected'))
+    }
+    pending.clear()
+    failGate(new Error('client closed')) // settle any pending gate; a no-op if already resolved
+    ws.close()
+  }
+
+  return { call, close }
 }
 
 const TOOL_DEFS = [

@@ -23,6 +23,20 @@ function fakeBrowser(port: number, handler: (req: any) => any): Promise<WebSocke
   })
 }
 
+// Like fakeBrowser, but RECORDS every request it is handed — so a test can assert
+// that a request the caller abandoned is never delivered to the canvas.
+function recordingBrowser(port: number, log: any[]): Promise<WebSocket> {
+  const ws = new WebSocket(`ws://localhost:${port}/?role=browser`)
+  return new Promise((res) => {
+    ws.onopen = () => res(ws)
+    ws.onmessage = (e) => {
+      const req = JSON.parse(e.data as string)
+      log.push(req)
+      ws.send(JSON.stringify({ requestId: req.requestId, ok: true, result: { echoed: req.tool } }))
+    }
+  })
+}
+
 test('call round-trips through relay to the browser', async () => {
   const s = startRelay(0)
   const browser = await fakeBrowser(s.port, (req) => ({ ok: true, result: { echoed: req.tool } }))
@@ -51,6 +65,124 @@ test('relay unreachable → call rejects, does not hang', async () => {
   const client = createCanvasClient('ws://127.0.0.1:1/?role=mcp', { timeoutMs: 2000 })
   await expect(client.call('read_canvas', {})).rejects.toThrow()
   client.close()
+})
+
+test('mcp client reconnects after a relay restart on the same port', async () => {
+  const PORT = 19000 + Math.floor(Math.random() * 2000)
+  const s1 = startRelay(PORT)
+  const browser1 = await fakeBrowser(PORT, (req) => ({ ok: true, result: { echoed: req.tool } }))
+  const client = createCanvasClient(`ws://localhost:${PORT}/?role=mcp`, { timeoutMs: 500, backoffMs: 40 })
+  expect(await client.call('get_snapshot', {})).toEqual({ echoed: 'get_snapshot' })
+
+  // relay dies (force-close the mcp socket so onclose fires) → client should back off and retry
+  browser1.close(); s1.stop(true)
+  await new Promise((r) => setTimeout(r, 30))
+
+  // relay comes back on the SAME port with a fresh browser
+  const s2 = startRelay(PORT)
+  const browser2 = await fakeBrowser(PORT, (req) => ({ ok: true, result: { echoed2: req.tool } }))
+  await new Promise((r) => setTimeout(r, 300)) // let a backoff cycle land
+
+  expect(await client.call('read_canvas', {})).toEqual({ echoed2: 'read_canvas' })
+  client.close(); browser2.close(); s2.stop()
+})
+
+test('call issued while the relay is down succeeds after the client reconnects', async () => {
+  const PORT = 23000 + Math.floor(Math.random() * 2000)
+  const s1 = startRelay(PORT)
+  const browser1 = await fakeBrowser(PORT, (req) => ({ ok: true, result: { echoed: req.tool } }))
+  const client = createCanvasClient(`ws://localhost:${PORT}/?role=mcp`, { timeoutMs: 5000, backoffMs: 200 })
+  expect(await client.call('get_snapshot', {})).toEqual({ echoed: 'get_snapshot' })
+
+  browser1.close(); s1.stop(true)
+  await new Promise((r) => setTimeout(r, 20)) // let onclose install the fresh pending gate
+
+  // issued WHILE DOWN: must be held at the gate, not fired into the closed socket
+  const inFlight = client.call('read_canvas', {})
+
+  const s2 = startRelay(PORT)
+  const browser2 = await fakeBrowser(PORT, (req) => ({ ok: true, result: { echoed2: req.tool } }))
+  expect(await inFlight).toEqual({ echoed2: 'read_canvas' })
+
+  client.close(); browser2.close(); s2.stop()
+})
+
+test('client.close() stops reconnection and fails later calls fast', async () => {
+  const PORT = 21000 + Math.floor(Math.random() * 2000)
+  const s = startRelay(PORT)
+  const browser = await fakeBrowser(PORT, (req) => ({ ok: true, result: { echoed: req.tool } }))
+  const client = createCanvasClient(`ws://localhost:${PORT}/?role=mcp`, { timeoutMs: 5000, backoffMs: 40 })
+  expect(await client.call('get_snapshot', {})).toEqual({ echoed: 'get_snapshot' })
+  client.close()
+  browser.close(); s.stop(true)
+
+  // a listener on the same port counts any reconnect the closed client attempts
+  let attempts = 0
+  const probe = Bun.serve({
+    port: PORT,
+    fetch(req, server) {
+      attempts++
+      if (server.upgrade(req)) return
+      return new Response('websocket only', { status: 426 })
+    },
+    websocket: { message() {} },
+  })
+  await new Promise((r) => setTimeout(r, 200)) // ~5 backoff windows
+  expect(attempts).toBe(0)
+
+  // and a call after close() rejects immediately — it must not wait out timeoutMs
+  const t0 = Date.now()
+  await expect(client.call('read_canvas', {})).rejects.toThrow('client closed')
+  expect(Date.now() - t0).toBeLessThan(200)
+
+  probe.stop(true)
+})
+
+test('close() rejects in-flight calls instead of letting them time out', async () => {
+  const s = startRelay(0)
+  const browser = await fakeBrowser(s.port, () => undefined) // never replies
+  const client = createCanvasClient(`ws://localhost:${s.port}/?role=mcp`, { timeoutMs: 5000 })
+  const inFlight = client.call('read_canvas', {})
+  await new Promise((r) => setTimeout(r, 20)) // let it reach the relay
+  const t0 = Date.now()
+  client.close()
+  await expect(inFlight).rejects.toThrow('relay disconnected')
+  expect(Date.now() - t0).toBeLessThan(200)
+  browser.close(); s.stop()
+})
+
+test('a call that timed out at the gate is NOT replayed onto the reconnected socket', async () => {
+  const PORT = 25000 + Math.floor(Math.random() * 2000)
+  const s1 = startRelay(PORT)
+  const seen1: any[] = []
+  const browser1 = await recordingBrowser(PORT, seen1)
+  // short timeout, long backoff → the timeout fires while the ready gate is still pending
+  const client = createCanvasClient(`ws://localhost:${PORT}/?role=mcp`, { timeoutMs: 120, backoffMs: 400 })
+  expect(await client.call('get_snapshot', {})).toEqual({ echoed: 'get_snapshot' })
+
+  browser1.close(); s1.stop(true)
+  await new Promise((r) => setTimeout(r, 20)) // let onclose install the fresh gate + retry timer
+
+  // issued while down: it parks at the gate and its 120ms timer fires long before
+  // the 400ms reconnect, so the caller has abandoned it by the time the gate opens
+  const abandoned = client.call('create_shape', { type: 'rectangle', x: 1, y: 2 })
+
+  // relay comes back on the same port with a NEW recording browser, before the retry
+  const s2 = startRelay(PORT)
+  const seen2: any[] = []
+  const browser2 = await recordingBrowser(PORT, seen2)
+
+  await expect(abandoned).rejects.toThrow('canvas timeout')
+  await new Promise((r) => setTimeout(r, 600)) // well past the reconnect
+
+  // the abandoned create_shape must never reach the canvas — no duplicate write
+  expect(seen2).toEqual([])
+
+  // and the client really did reconnect (otherwise the empty log above is vacuous)
+  expect(await client.call('read_canvas', {})).toEqual({ echoed: 'read_canvas' })
+  expect(seen2.map((r) => r.tool)).toEqual(['read_canvas'])
+
+  client.close(); browser2.close(); s2.stop()
 })
 
 // --- dispatch map: one handler per tool, centralized unknown/error handling ---
