@@ -29,10 +29,15 @@ is supported: the newest connection wins, and the relay closes the superseded on
 ## Adding a tool
 
 One `TOOL_DEFS` entry + one handler in `createDispatcher` (`src/server.ts`) + one branch in
-`runTool` (`browser/src/main.tsx`) + a handler unit test using a fake `call`. Browser-side
-logic has no unit-test harness — verify it at runtime against the live canvas with a short
-script that imports `createCanvasClient`/`createDispatcher` from `src/server.ts` and drives the
-editor over the relay (a fresh connection, so no MCP-server restart needed).
+`runTool` (`browser/src/tools.ts`) + a handler unit test using a fake `call`. Browser-side
+logic has no unit-test harness (except the pure layout in `graph.ts`, which does) — verify the
+rest at runtime against the live canvas with a short script that imports
+`createCanvasClient`/`createDispatcher` from `src/server.ts` and drives the editor over the
+relay (a fresh connection, so no MCP-server restart needed).
+
+The browser app (`browser/src/`) is split by concern: `graph.ts` — pure node/edge layout, no
+tldraw or React imports; `tools.ts` — `runTool` and its editor helpers, including per-agent
+attribution; `connect.ts` — the WS relay wiring; `main.tsx` — the Vite entry and React shell.
 
 Prefer tldraw's built-ins over hand-rolled equivalents: `editor.run()` to make a multi-shape
 tool one atomic transaction and one undo step, `getSortedChildIdsForParent` for frame children,

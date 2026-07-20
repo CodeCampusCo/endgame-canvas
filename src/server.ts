@@ -335,9 +335,9 @@ const TOOL_DEFS = [
     },
   },
   {
-    name: 'create_flowchart',
+    name: 'create_graph',
     description:
-      'Create a whole flowchart in one step: lay out nodes (tree or grid), create each as a shape, and connect edges with bound arrows. Optionally wraps it all in a named frame.',
+      'Build a node-and-edge diagram in one step: lay out nodes (tree or grid), create each as a shape, and connect edges with bound arrows. Optionally wrap it all in a named frame. Works for any graph — flowchart, org chart, dependency graph, etc.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -367,7 +367,7 @@ const TOOL_DEFS = [
           },
         },
         layout: { type: 'string', enum: ['tree', 'grid'], description: "Default 'tree'." },
-        frame: { type: 'string', description: 'Optional frame name to wrap the flowchart in.' },
+        frame: { type: 'string', description: 'Optional frame name to wrap the graph in.' },
         x: { type: 'number', description: 'Layout origin x, default 100.' },
         y: { type: 'number', description: 'Layout origin y, default 100.' },
       },
@@ -376,7 +376,7 @@ const TOOL_DEFS = [
   },
   {
     name: 'create_connected',
-    description: 'Create a new node next to an existing shape and connect it with a bound arrow — extend a flowchart one step at a time.',
+    description: 'Create a new node next to an existing shape and connect it with a bound arrow — connect a new node to an existing shape.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -479,8 +479,8 @@ export function createDispatcher(call: CanvasCall) {
     async switch_page(args) {
       return asText(JSON.stringify(await call('switch_page', args)))
     },
-    async create_flowchart(args) {
-      return asText(JSON.stringify(await call('create_flowchart', args)))
+    async create_graph(args) {
+      return asText(JSON.stringify(await call('create_graph', args)))
     },
     async create_connected(args) {
       return asText(JSON.stringify(await call('create_connected', args)))
