@@ -39,7 +39,7 @@ function recordingBrowser(port: number, log: any[]): Promise<WebSocket> {
 
 test('call round-trips through relay to the browser', async () => {
   const s = startRelay(0)
-  const browser = await fakeBrowser(s.port, (req) => ({ ok: true, result: { echoed: req.tool } }))
+  const browser = await fakeBrowser(s.port!, (req) => ({ ok: true, result: { echoed: req.tool } }))
   const client = createCanvasClient(`ws://localhost:${s.port}/?role=mcp`)
   expect(await client.call('get_snapshot', {})).toEqual({ echoed: 'get_snapshot' })
   client.close(); browser.close(); s.stop()
@@ -54,7 +54,7 @@ test('no browser → rejects with relay error', async () => {
 
 test('silent browser → canvas timeout', async () => {
   const s = startRelay(0)
-  const browser = await fakeBrowser(s.port, () => undefined) // never replies
+  const browser = await fakeBrowser(s.port!, () => undefined) // never replies
   const client = createCanvasClient(`ws://localhost:${s.port}/?role=mcp`, { timeoutMs: 100 })
   await expect(client.call('read_canvas', {})).rejects.toThrow('canvas timeout')
   client.close(); browser.close(); s.stop()
@@ -140,7 +140,7 @@ test('client.close() stops reconnection and fails later calls fast', async () =>
 
 test('close() rejects in-flight calls instead of letting them time out', async () => {
   const s = startRelay(0)
-  const browser = await fakeBrowser(s.port, () => undefined) // never replies
+  const browser = await fakeBrowser(s.port!, () => undefined) // never replies
   const client = createCanvasClient(`ws://localhost:${s.port}/?role=mcp`, { timeoutMs: 5000 })
   const inFlight = client.call('read_canvas', {})
   await new Promise((r) => setTimeout(r, 20)) // let it reach the relay
@@ -522,7 +522,7 @@ test('dispatch export_image → rejects paths outside the server cwd', async () 
   }))
   const r = await dispatch('export_image', { target: 'canvas', format: 'png', path: '/etc/passwd' })
   expect(r.isError).toBe(true)
-  expect(r.content[0].text).toInclude('path must be inside the server working directory')
+  expect((r.content[0] as { text: string }).text).toInclude('path must be inside the server working directory')
 })
 
 test('dispatch export_image → rejects a sibling directory whose name starts with the cwd prefix', async () => {
@@ -533,7 +533,7 @@ test('dispatch export_image → rejects a sibling directory whose name starts wi
   }))
   const r = await dispatch('export_image', { target: 'canvas', format: 'png', path: resolve(process.cwd() + '-evil/file.png') })
   expect(r.isError).toBe(true)
-  expect(r.content[0].text).toInclude('path must be inside the server working directory')
+  expect((r.content[0] as { text: string }).text).toInclude('path must be inside the server working directory')
 })
 
 test('dispatch export_image → resolves a relative path against cwd', async () => {
@@ -546,7 +546,7 @@ test('dispatch export_image → resolves a relative path against cwd', async () 
   try {
     const r = await dispatch('export_image', { target: 'canvas', format: 'png', path: rel })
     expect(r.isError).toBeUndefined()
-    const parsed = JSON.parse(r.content[0].text)
+    const parsed = JSON.parse((r.content[0] as { text: string }).text)
     expect(parsed.path).toBe(resolve(rel))
   } finally {
     await unlink(rel)

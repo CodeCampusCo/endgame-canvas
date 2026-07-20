@@ -1,8 +1,8 @@
 # endgame-canvas
 
 A localhost tldraw canvas exposed over MCP — a shared visual medium where a human and an agent
-draw and read the same canvas to align understanding and produce diagrams. The drawing faculty
-of the endgame dev-office: a personal whiteboard, driven from chat.
+draw and read the same canvas to align understanding and produce diagrams: a personal
+whiteboard, driven from chat. See README.md for the product overview.
 
 ## Status
 
