@@ -54,16 +54,68 @@ const TOOL_DEFS = [
   },
   {
     name: 'create_shape',
-    description: 'Create a shape on the canvas (rectangle, ellipse, or text).',
+    description: 'Create a shape on the canvas (rectangle, ellipse, text, or another geo variant).',
     inputSchema: {
       type: 'object',
       properties: {
-        type: { type: 'string', enum: ['rectangle', 'ellipse', 'text'] },
+        type: {
+          type: 'string',
+          enum: [
+            'rectangle',
+            'ellipse',
+            'text',
+            'triangle',
+            'diamond',
+            'star',
+            'hexagon',
+            'cloud',
+            'x-box',
+            'check-box',
+          ],
+        },
         x: { type: 'number' },
         y: { type: 'number' },
         text: { type: 'string' },
       },
       required: ['type', 'x', 'y'],
+    },
+  },
+  {
+    name: 'create_line',
+    description: 'Create a straight/multi-point line through a sequence of page-coordinate points.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        points: {
+          type: 'array',
+          minItems: 2,
+          items: {
+            type: 'object',
+            properties: { x: { type: 'number' }, y: { type: 'number' } },
+            required: ['x', 'y'],
+          },
+        },
+      },
+      required: ['points'],
+    },
+  },
+  {
+    name: 'create_highlight',
+    description: 'Create a highlighter stroke through a sequence of page-coordinate points.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        points: {
+          type: 'array',
+          minItems: 2,
+          items: {
+            type: 'object',
+            properties: { x: { type: 'number' }, y: { type: 'number' } },
+            required: ['x', 'y'],
+          },
+        },
+      },
+      required: ['points'],
     },
   },
   {
@@ -200,6 +252,12 @@ export function createDispatcher(call: CanvasCall) {
     },
     async create_shape(args) {
       return asText(JSON.stringify(await call('create_shape', args)))
+    },
+    async create_line(args) {
+      return asText(JSON.stringify(await call('create_line', args)))
+    },
+    async create_highlight(args) {
+      return asText(JSON.stringify(await call('create_highlight', args)))
     },
     async create_frame(args) {
       return asText(JSON.stringify(await call('create_frame', args)))

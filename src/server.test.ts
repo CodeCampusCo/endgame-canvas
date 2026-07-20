@@ -265,3 +265,44 @@ test('dispatch select → forwards ids, returns honest selected count as text', 
   })
   expect(seen).toEqual({ tool: 'select', params: args })
 })
+
+// --- Family A: extended draw vocabulary (geo variants, line, highlight) ---
+
+test('dispatch create_shape with type: triangle → still forwards correctly', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:tri1' }
+  })
+  const args = { type: 'triangle', x: 400, y: 1100 }
+  expect(await dispatch('create_shape', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:tri1' }) }],
+  })
+  expect(seen).toEqual({ tool: 'create_shape', params: args })
+})
+
+test('dispatch create_line → forwards points, returns id as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:line1' }
+  })
+  const args = { points: [{ x: 400, y: 1350 }, { x: 600, y: 1300 }, { x: 800, y: 1400 }] }
+  expect(await dispatch('create_line', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:line1' }) }],
+  })
+  expect(seen).toEqual({ tool: 'create_line', params: args })
+})
+
+test('dispatch create_highlight → forwards points, returns id as text', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:hl1' }
+  })
+  const args = { points: [{ x: 900, y: 1350 }, { x: 1100, y: 1300 }, { x: 1300, y: 1400 }] }
+  expect(await dispatch('create_highlight', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:hl1' }) }],
+  })
+  expect(seen).toEqual({ tool: 'create_highlight', params: args })
+})
