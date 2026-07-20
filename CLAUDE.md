@@ -6,11 +6,11 @@ whiteboard, driven from chat. See README.md for the product overview.
 
 ## Status
 
-**Working tool set.** The read spike passed (an agent can read a human's freehand off the live
-canvas), and the frame whiteboard plus the full draw/export vocabulary are built and merged:
-frames (create/list/read), bound arrows, notes, edit/delete, camera + selection, extended geo
-shapes, lines and highlights, image export to disk, multi-page, and composite flowcharts.
-Relay socket-lifecycle hardening and per-agent attribution colours are in as well.
+**Working tool set.** An agent can read a human's freehand off the live canvas, and the frame
+whiteboard plus the full draw/export vocabulary are built: frames (create/list/read), bound
+arrows, notes, edit/delete, camera + selection, extended geo shapes, lines and highlights,
+image export to disk, multi-page, and composite flowcharts. Relay socket-lifecycle hardening
+and per-agent attribution colours are in as well.
 
 **Scope: one human, one agent, one browser.** Multi-agent orchestration ("Mode B" — write
 serialization / turn-token, HTTP transport for many MCP clients) was explored and **cut**. Two
