@@ -7,7 +7,7 @@ diagrams, right from a chat.
 ![Architecture of endgame-canvas](docs/hero.png)
 
 > **The diagram above was not made in a design tool.** An AI agent drew it directly on the
-> canvas using endgame-canvas's own MCP tools (`create_frame`, `create_flowchart`,
+> canvas using endgame-canvas's own MCP tools (`create_frame`, `create_graph`,
 > `create_shape`, `create_arrow`, `create_note`, `export_image`), then exported it to the PNG
 > you're looking at — from this prompt:
 >
@@ -25,7 +25,7 @@ diagrams, right from a chat.
 Chat is linear; understanding often isn't. endgame-canvas gives an agent a real 2D surface it
 can both **read** and **draw on** — including a human's freehand strokes. The agent can read a
 scribbled note, tell which shape a hand-drawn circle encloses, connect boxes with bound arrows,
-lay out a flowchart in one call, and export the result to a file you can drop into a document.
+lay out a graph in one call, and export the result to a file you can drop into a document.
 
 ## What it can do
 
@@ -41,8 +41,8 @@ lay out a flowchart in one call, and export the result to a file you can drop in
   ("what's in frame X?").
 - **Edit** — `update_shape` (move / resize / relabel / recolour), `delete_shape`.
 - **Navigate** — `zoom_to_frame`, `select` — point the human's view and highlight shapes.
-- **Compose** — `create_flowchart` (nodes + bound arrows + tree/grid layout in one call),
-  `create_connected`.
+- **Compose** — `create_graph` — any node-and-edge diagram (flowchart, org chart, dependency
+  graph…), laid out tree or grid, with bound arrows, in one call — plus `create_connected`.
 - **Pages** — `create_page`, `list_pages`, `switch_page`.
 - **Export** — `export_image` writes a PNG or SVG **to disk**, so diagrams land in your docs.
 - **Attribution** — `list_agents`; set `CANVAS_AGENT` and an agent's shapes take a distinct
@@ -98,7 +98,7 @@ Ctrl-C). The pieces also run on their own: `bun run relay`, `bun run dev`, `bun 
 `bun test` runs the suite.
 
 Adding a tool is one `TOOL_DEFS` entry + one handler in `createDispatcher` (`src/server.ts`) +
-one branch in `runTool` (`browser/src/main.tsx`) + a handler unit test.
+one branch in `runTool` (`browser/src/tools.ts`) + a handler unit test.
 
 ## Stack
 

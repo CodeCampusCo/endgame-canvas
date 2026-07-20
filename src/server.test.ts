@@ -592,9 +592,9 @@ test('dispatch switch_page → forwards name, returns ok as text', async () => {
   expect(seen).toEqual({ tool: 'switch_page', params: args })
 })
 
-// --- Family G: composite flowchart tools ---
+// --- Family G: graph tools ---
 
-test('dispatch create_flowchart → forwards nodes/edges/layout/frame, returns ids+arrowIds as text', async () => {
+test('dispatch create_graph → forwards nodes/edges/layout/frame, returns ids+arrowIds as text', async () => {
   let seen: any
   const result = {
     ids: { A: 'shape:a', B: 'shape:b' },
@@ -612,13 +612,13 @@ test('dispatch create_flowchart → forwards nodes/edges/layout/frame, returns i
     x: 200,
     y: 2100,
   }
-  expect(await dispatch('create_flowchart', args)).toEqual({
+  expect(await dispatch('create_graph', args)).toEqual({
     content: [{ type: 'text', text: JSON.stringify(result) }],
   })
-  expect(seen).toEqual({ tool: 'create_flowchart', params: args })
+  expect(seen).toEqual({ tool: 'create_graph', params: args })
 })
 
-test('dispatch create_flowchart with minimal args → still forwards correctly', async () => {
+test('dispatch create_graph with minimal args → still forwards correctly', async () => {
   let seen: any
   const result = { ids: { A: 'shape:a' }, arrowIds: [] }
   const dispatch = createDispatcher(async (tool, params) => {
@@ -626,10 +626,10 @@ test('dispatch create_flowchart with minimal args → still forwards correctly',
     return result
   })
   const args = { nodes: [{ key: 'A', text: 'Solo' }], edges: [] }
-  expect(await dispatch('create_flowchart', args)).toEqual({
+  expect(await dispatch('create_graph', args)).toEqual({
     content: [{ type: 'text', text: JSON.stringify(result) }],
   })
-  expect(seen).toEqual({ tool: 'create_flowchart', params: args })
+  expect(seen).toEqual({ tool: 'create_graph', params: args })
 })
 
 test('dispatch create_connected → forwards fromId/text/shape/direction, returns nodeId+arrowId as text', async () => {
