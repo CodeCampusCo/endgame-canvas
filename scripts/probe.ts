@@ -1,6 +1,13 @@
 import { createCanvasClient, createDispatcher } from '../src/server'
 
-const client = createCanvasClient('ws://localhost:9910/?role=mcp')
+// Optional agent identity: unset → connect exactly as before (no `agent` param).
+// Set CANVAS_AGENT to simulate a specific agent's connection (e.g. two probes as
+// two different agents, to exercise per-agent attribution colours).
+const agent = process.env.CANVAS_AGENT
+const relayUrl = agent
+  ? `ws://localhost:9910/?role=mcp&agent=${encodeURIComponent(agent)}`
+  : 'ws://localhost:9910/?role=mcp'
+const client = createCanvasClient(relayUrl)
 const cmd = process.argv[2] ?? 'get_snapshot'
 
 // points given as "x,y" pairs, e.g. create-line 400,1350 600,1300 800,1400
@@ -111,6 +118,8 @@ if (cmd === 'create') {
   const direction = process.argv[5] ?? 'right'
   if (!fromId) throw new Error('usage: create-connected <fromId> [text] [right|down]')
   console.log(await client.call('create_connected', { fromId, text, direction }))
+} else if (cmd === 'list-agents') {
+  console.log(JSON.stringify(await client.call('list_agents', {}), null, 2))
 } else if (cmd === 'export-image') {
   // usage: export-image <canvas|frame|selection> <png|svg> <path> [frameName]
   // Goes through the same dispatcher the real MCP server uses, so this

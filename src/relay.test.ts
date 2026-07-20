@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test'
 import { startRelay } from './relay'
 
-function connect(port: number, role: string): Promise<WebSocket> {
-  const ws = new WebSocket(`ws://localhost:${port}/?role=${role}`)
+function connect(port: number, role: string, agent?: string): Promise<WebSocket> {
+  const qs = agent ? `role=${role}&agent=${agent}` : `role=${role}`
+  const ws = new WebSocket(`ws://localhost:${port}/?${qs}`)
   return new Promise((res) => { ws.onopen = () => res(ws) })
 }
 function nextMsg(ws: WebSocket): Promise<any> {
@@ -213,4 +214,31 @@ test('custom allowedOrigins is honored (allow the custom, reject the default)', 
   const bad = await fetch(`http://localhost:${s.port}/?role=browser`, { headers: { origin: 'http://localhost:5173' } })
   expect(bad.status).toBe(403)
   s.stop()
+})
+
+// --- Milestone 3: per-agent attribution — relay tags the forwarded request ---
+
+test('mcp client connects with ?agent=alice → forwarded message carries agent: "alice"', async () => {
+  const s = startRelay(0)
+  const browser = await connect(s.port!, 'browser')
+  const mcp = await connect(s.port!, 'mcp', 'alice')
+  const p = nextMsg(browser)
+  mcp.send(JSON.stringify({ requestId: 'r1', tool: 'create_shape', params: {} }))
+  const got = await p
+  expect(got.agent).toBe('alice')
+  expect(got.requestId).toBe('r1')
+  expect(got.tool).toBe('create_shape')
+  browser.close(); mcp.close(); s.stop()
+})
+
+test('mcp client with no agent param → forwarded message has no agent (default path unchanged)', async () => {
+  const s = startRelay(0)
+  const browser = await connect(s.port!, 'browser')
+  const mcp = await connect(s.port!, 'mcp')
+  const p = nextMsg(browser)
+  mcp.send(JSON.stringify({ requestId: 'r2', tool: 'get_snapshot', params: {} }))
+  const got = await p
+  expect(got.agent).toBeUndefined()
+  expect('agent' in got).toBe(false)
+  browser.close(); mcp.close(); s.stop()
 })

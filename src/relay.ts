@@ -1,4 +1,4 @@
-type ServerWS = import('bun').ServerWebSocket<{ role: string }>
+type ServerWS = import('bun').ServerWebSocket<{ role: string; agent?: string }>
 
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173']
 
@@ -22,7 +22,7 @@ export function startRelay(port = 9910, opts: { allowedOrigins?: string[] } = {}
     browserSocket = null
   }
 
-  const server = Bun.serve<{ role: string }>({
+  const server = Bun.serve<{ role: string; agent?: string }>({
     port,
     fetch(req, server) {
       // Origin allowlist: browsers send an Origin header; trusted local non-browser
@@ -32,8 +32,10 @@ export function startRelay(port = 9910, opts: { allowedOrigins?: string[] } = {}
       if (origin !== null && !allowedOrigins.includes(origin)) {
         return new Response('forbidden origin', { status: 403 })
       }
-      const role = new URL(req.url).searchParams.get('role') ?? 'unknown'
-      if (server.upgrade(req, { data: { role } })) return
+      const url = new URL(req.url)
+      const role = url.searchParams.get('role') ?? 'unknown'
+      const agent = url.searchParams.get('agent') ?? undefined
+      if (server.upgrade(req, { data: { role, agent } })) return
       return new Response('websocket only', { status: 426 })
     },
     websocket: {
@@ -76,7 +78,9 @@ export function startRelay(port = 9910, opts: { allowedOrigins?: string[] } = {}
             return
           }
           pending.set(msg.requestId, ws)
-          browserSocket.send(JSON.stringify(msg))
+          // Additive tag: the browser destructures { requestId, tool, params } today
+          // and is unaffected by the extra field. Attribution consumes it opt-in.
+          browserSocket.send(JSON.stringify({ ...msg, agent: ws.data.agent }))
         } else if (ws.data.role === 'browser' && ws === browserSocket) {
           // Only the CURRENT browser may answer — an evicted phantom must not
           // deliver a reply between being replaced and being closed.

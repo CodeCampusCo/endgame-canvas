@@ -5,6 +5,34 @@ import { createRoot } from 'react-dom/client'
 
 const RELAY_URL = 'ws://localhost:9910/?role=browser'
 
+// Real tldraw DefaultColorStyle enum values (verified in
+// @tldraw/tlschema/dist-cjs/styles/TLColorStyle.js: defaultColorNames). Excludes
+// 'black' (the no-agent default — must never be assigned to an agent) and 'white'
+// (invisible against the canvas's light background).
+const AGENT_PALETTE = [
+  'blue', 'green', 'violet', 'orange', 'light-blue',
+  'light-green', 'red', 'yellow', 'light-violet', 'grey',
+] as const
+
+// agent name → colour, populated the first time each agent is seen. This map IS
+// what list_agents reports — the browser is the source of truth (agents seen
+// since the page loaded), not whoever happens to be connected to the relay right now.
+const agentColors = new Map<string, string>()
+
+// Deterministic so the same agent name gets the same colour across restarts.
+// Collisions between different names are acceptable at this scale (see task brief).
+function colorForAgent(agent: string): string {
+  const known = agentColors.get(agent)
+  if (known) return known
+  let hash = 0
+  for (let i = 0; i < agent.length; i++) {
+    hash = (hash * 31 + agent.charCodeAt(i)) | 0
+  }
+  const color = AGENT_PALETTE[Math.abs(hash) % AGENT_PALETTE.length]
+  agentColors.set(agent, color)
+  return color
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -43,7 +71,7 @@ function findFrame(editor: Editor, name: string) {
 // Shared by create_arrow and the flowchart/connected tools: create an arrow shape
 // bound at both ends (start→fromShapeId, end→toShapeId) so moving either shape
 // drags the arrow with it.
-function bindArrow(editor: Editor, fromShapeId: TLShapeId, toShapeId: TLShapeId, text?: string) {
+function bindArrow(editor: Editor, fromShapeId: TLShapeId, toShapeId: TLShapeId, text?: string, color?: string) {
   if (!editor.getShape(fromShapeId)) throw new Error('shape not found: ' + fromShapeId)
   if (!editor.getShape(toShapeId)) throw new Error('shape not found: ' + toShapeId)
   const arrowId = createShapeId()
@@ -53,7 +81,7 @@ function bindArrow(editor: Editor, fromShapeId: TLShapeId, toShapeId: TLShapeId,
     type: 'arrow',
     x: start?.x ?? 0,
     y: start?.y ?? 0,
-    props: text ? { text } : {},
+    props: { ...(text ? { text } : {}), ...(color ? { color } : {}) },
   })
   editor.createBinding({
     type: 'arrow',
@@ -73,7 +101,7 @@ function bindArrow(editor: Editor, fromShapeId: TLShapeId, toShapeId: TLShapeId,
 // Shared by the create_flowchart and create_connected tools: a geo node with
 // centered text, ready to be positioned by the caller. (create_shape keeps its
 // own inline geo block — the shared props are duplicated, not routed through here.)
-function createGeoNode(editor: Editor, geo: string, x: number, y: number, text: string, w: number, h: number): TLShapeId {
+function createGeoNode(editor: Editor, geo: string, x: number, y: number, text: string, w: number, h: number, color?: string): TLShapeId {
   const id = createShapeId()
   editor.createShape({
     id,
@@ -88,6 +116,7 @@ function createGeoNode(editor: Editor, geo: string, x: number, y: number, text: 
       align: 'middle',
       verticalAlign: 'middle',
       font: 'draw',
+      ...(color ? { color } : {}),
     },
   })
   return id
@@ -181,7 +210,11 @@ function flowchartPositions(
   return positions
 }
 
-async function runTool(editor: Editor, tool: string, params: any) {
+async function runTool(editor: Editor, tool: string, params: any, agent?: string) {
+  // Absent agent (no CANVAS_AGENT, e.g. an unlabelled probe) → undefined, so every
+  // ...(color ? {...} : {}) spread below is a no-op and tldraw's own default applies —
+  // behaviour is unchanged from before this feature existed.
+  const color = agent ? colorForAgent(agent) : undefined
   // read_canvas/get_snapshot/list_frames/read_frame all call editor.getCurrentPageShapes(),
   // so they're inherently scoped to the current page — switch_page re-scopes them for free.
   if (tool === 'read_canvas') {
@@ -237,7 +270,10 @@ async function runTool(editor: Editor, tool: string, params: any) {
     const { type, x, y, text } = params
     const id = createShapeId()
     if (type === 'text') {
-      editor.createShape({ id, type: 'text', x, y, props: { richText: toRichText(text ?? '') } })
+      editor.createShape({
+        id, type: 'text', x, y,
+        props: { richText: toRichText(text ?? ''), ...(color ? { color } : {}) },
+      })
     } else {
       editor.createShape({
         id,
@@ -252,6 +288,7 @@ async function runTool(editor: Editor, tool: string, params: any) {
           align: 'middle',
           verticalAlign: 'middle',
           font: 'draw',
+          ...(color ? { color } : {}),
         },
       })
     }
@@ -272,7 +309,7 @@ async function runTool(editor: Editor, tool: string, params: any) {
       type: 'line',
       x: origin.x,
       y: origin.y,
-      props: { points: pointsDict, scale: 1 },
+      props: { points: pointsDict, scale: 1, ...(color ? { color } : {}) },
     })
     return { id }
   }
@@ -292,18 +329,22 @@ async function runTool(editor: Editor, tool: string, params: any) {
         isComplete: true,
         isPen: false,
         scale: 1,
+        ...(color ? { color } : {}),
       },
     })
     return { id }
   }
   if (tool === 'create_arrow') {
     const { fromId, toId, text } = params
-    return { id: bindArrow(editor, fromId, toId, text) }
+    return { id: bindArrow(editor, fromId, toId, text, color) }
   }
   if (tool === 'create_note') {
     const { x, y, text } = params
     const id = createShapeId()
-    editor.createShape({ id, type: 'note', x, y, props: { richText: toRichText(text) } })
+    editor.createShape({
+      id, type: 'note', x, y,
+      props: { richText: toRichText(text), ...(color ? { color } : {}) },
+    })
     return { id }
   }
   if (tool === 'update_shape') {
@@ -421,14 +462,14 @@ async function runTool(editor: Editor, tool: string, params: any) {
     const ids: Record<string, TLShapeId> = {}
     for (const node of nodes) {
       const { px, py } = positions.get(node.key)!
-      ids[node.key] = createGeoNode(editor, node.shape ?? 'rectangle', px, py, node.text, FLOWCHART_NODE_W, FLOWCHART_NODE_H)
+      ids[node.key] = createGeoNode(editor, node.shape ?? 'rectangle', px, py, node.text, FLOWCHART_NODE_W, FLOWCHART_NODE_H, color)
     }
 
     const arrowIds: string[] = []
     for (const edge of edges) {
       if (!(edge.from in ids)) throw new Error('unknown node key in edge: ' + edge.from)
       if (!(edge.to in ids)) throw new Error('unknown node key in edge: ' + edge.to)
-      arrowIds.push(bindArrow(editor, ids[edge.from], ids[edge.to], edge.text))
+      arrowIds.push(bindArrow(editor, ids[edge.from], ids[edge.to], edge.text, color))
     }
 
     return { ids, arrowIds }
@@ -441,9 +482,12 @@ async function runTool(editor: Editor, tool: string, params: any) {
     const GAP = 80
     const nx = direction === 'down' ? b.x : b.x + b.w + GAP
     const ny = direction === 'down' ? b.y + b.h + GAP : b.y
-    const nodeId = createGeoNode(editor, shape, nx, ny, text, FLOWCHART_NODE_W, FLOWCHART_NODE_H)
-    const arrowId = bindArrow(editor, fromId, nodeId, undefined)
+    const nodeId = createGeoNode(editor, shape, nx, ny, text, FLOWCHART_NODE_W, FLOWCHART_NODE_H, color)
+    const arrowId = bindArrow(editor, fromId, nodeId, undefined, color)
     return { nodeId, arrowId }
+  }
+  if (tool === 'list_agents') {
+    return Array.from(agentColors, ([agent, color]) => ({ agent, color }))
   }
   throw new Error(`unknown tool: ${tool}`)
 }
@@ -455,9 +499,9 @@ const SUPERSEDED_CLOSE_CODE = 4001
 function connectRelay(editor: Editor, onSuperseded: () => void) {
   const ws = new WebSocket(RELAY_URL)
   ws.onmessage = async (e) => {
-    const { requestId, tool, params } = JSON.parse(e.data as string)
+    const { requestId, tool, params, agent } = JSON.parse(e.data as string)
     try {
-      const result = await runTool(editor, tool, params)
+      const result = await runTool(editor, tool, params, agent)
       ws.send(JSON.stringify({ requestId, ok: true, result }))
     } catch (err: any) {
       ws.send(JSON.stringify({ requestId, ok: false, error: String(err?.message ?? err) }))
