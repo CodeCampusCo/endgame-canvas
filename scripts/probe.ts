@@ -30,6 +30,20 @@ if (cmd === 'create') {
   const y = Number(process.argv[4] ?? 500)
   const text = process.argv[5] ?? 'hello'
   console.log(await client.call('create_note', { x, y, text }))
+} else if (cmd === 'update-shape') {
+  const id = process.argv[3]
+  if (!id) throw new Error('usage: update-shape <id> [x=..] [y=..] [text=..] [color=..] [fill=..]')
+  const params: Record<string, unknown> = { id }
+  for (const arg of process.argv.slice(4)) {
+    const [key, ...rest] = arg.split('=')
+    const value = rest.join('=')
+    params[key] = key === 'x' || key === 'y' || key === 'w' || key === 'h' ? Number(value) : value
+  }
+  console.log(await client.call('update_shape', params))
+} else if (cmd === 'delete-shape') {
+  const ids = process.argv.slice(3)
+  if (ids.length === 0) throw new Error('usage: delete-shape <id...>')
+  console.log(await client.call('delete_shape', { ids }))
 } else {
   console.log(JSON.stringify(await client.call('get_snapshot', {}), null, 2))
 }
