@@ -1,0 +1,13 @@
+{
+  "name": "endgame-canvas",
+  "description": "The drawing discipline for the endgame-canvas MCP board: when a diagram earns its place, a hard complexity budget, the remove test, what the tree layout does for you, the emphasis the tools actually expose, and the read-back verification loop. Install alongside the MCP server so an agent draws diagrams a human can read at a glance.",
+  "version": "0.1.0",
+  "author": {
+    "name": "CodeCampusCo",
+    "url": "https://github.com/CodeCampusCo"
+  },
+  "homepage": "https://github.com/CodeCampusCo/endgame-canvas",
+  "repository": "https://github.com/CodeCampusCo/endgame-canvas",
+  "license": "MIT",
+  "keywords": ["diagrams", "tldraw", "canvas", "mcp", "flowchart", "architecture", "layout"]
+}

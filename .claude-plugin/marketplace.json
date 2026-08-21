@@ -1,0 +1,16 @@
+{
+  "name": "endgame-canvas",
+  "metadata": {
+    "description": "A localhost tldraw canvas exposed over MCP, plus the drawing discipline that keeps what an agent draws on it legible."
+  },
+  "owner": {
+    "name": "CodeCampusCo",
+    "url": "https://github.com/CodeCampusCo"
+  },
+  "plugins": [
+    {
+      "name": "endgame-canvas",
+      "source": "./"
+    }
+  ]
+}
