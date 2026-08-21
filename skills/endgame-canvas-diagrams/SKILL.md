@@ -178,7 +178,14 @@ arrow bindings. Look for the failure modes that a coordinate plan can't reveal:
 - boxes overlapping or text spilling outside its box,
 - arrows crossing each other (cut an edge, merge two nodes, or split the frame),
 - an arrow that isn't actually bound (it won't appear in the bindings) — recreate it with
-  `create_arrow({fromId, toId})`.
+  `create_arrow({fromId, toId})`,
+- **`strays` in the result.** tldraw drops a shape from a frame the moment it is dragged past
+  the edge and never takes it back on its own — not when the frame is resized to cover it
+  again, not when the shape is moved back inside. `read_frame` and `export_image` report those
+  shapes as `strays`; the field is absent when there are none. They are missing from the image,
+  the shape list, and any frame export, while the diagram still looks complete on screen, so an
+  export made in that state is quietly short. Put each one back with
+  `update_shape({id, parent: '<frame name>'})`, which is the only thing that undoes the drop.
 
 Fix with `update_shape` / `delete_shape`, then read again. Two or three quick read-fix passes is
 normal and is exactly how a good diagram gets made here — the same see-it-then-correct loop a
@@ -217,6 +224,7 @@ page was already open, so check the switch succeeded first.
 | Extend an existing diagram by one node | `create_connected` |
 | A single non-graph shape | `create_shape` (type/x/y/text only) |
 | Recolour / move / resize / relabel | `update_shape` (x/y/w/h/text/color/fill) |
+| Put a stray shape back into its frame | `update_shape({parent})` — a frame name, or `'page'` to lift it out |
 | Bound arrow between two shapes | `create_arrow` |
 | Annotation / legend | `create_note` |
 | **See what you actually drew** | `read_frame` (crop + shapes + bindings) |

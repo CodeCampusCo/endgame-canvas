@@ -283,6 +283,43 @@ test('dispatch read_frame with url → image content + shapes/bindings/frameId t
   })
 })
 
+test('dispatch read_frame surfaces strays — shapes overlapping the frame that are not its children', async () => {
+  const shapes = [{ id: 'shape:a', type: 'geo', x: 1, y: 2, w: 3, h: 4, text: 'in' }]
+  const strays = [{ id: 'shape:b', type: 'geo', x: 9, y: 9, w: 3, h: 4, text: 'out' }]
+  const dispatch = createDispatcher(async () => ({
+    url: 'data:image/png;base64,AAAB',
+    width: 400,
+    height: 300,
+    shapes,
+    bindings: [],
+    frameId: 'shape:frame1',
+    strays,
+  }))
+  expect(await dispatch('read_frame', { name: 'probe-frame' })).toEqual({
+    content: [
+      { type: 'image', data: 'AAAB', mimeType: 'image/png' },
+      {
+        type: 'text',
+        text: JSON.stringify({ shapes, bindings: [], frameId: 'shape:frame1', strays }, null, 2),
+      },
+    ],
+  })
+})
+
+test('dispatch read_frame omits strays entirely when the frame has none', async () => {
+  const dispatch = createDispatcher(async () => ({
+    url: null,
+    width: 0,
+    height: 0,
+    shapes: [],
+    bindings: [],
+    frameId: 'shape:frame1',
+    strays: [],
+  }))
+  const text = (await dispatch('read_frame', { name: 'f' })).content[0] as { text: string }
+  expect(JSON.parse(text.text)).toEqual({ shapes: [], bindings: [], frameId: 'shape:frame1' })
+})
+
 test('dispatch read_frame with url: null → text-only content, no image part', async () => {
   const dispatch = createDispatcher(async () => ({
     url: null,
@@ -347,6 +384,19 @@ test('dispatch update_shape → forwards a representative subset, returns id as 
     return { id: 'shape:a' }
   })
   const args = { id: 'shape:a', x: 100, y: 200, text: 'relabeled', color: 'blue' }
+  expect(await dispatch('update_shape', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:a' }) }],
+  })
+  expect(seen).toEqual({ tool: 'update_shape', params: args })
+})
+
+test('dispatch update_shape forwards parent — the way a stray gets back into its frame', async () => {
+  let seen: unknown
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:a' }
+  })
+  const args = { id: 'shape:a', parent: 'source map' }
   expect(await dispatch('update_shape', args)).toEqual({
     content: [{ type: 'text', text: JSON.stringify({ id: 'shape:a' }) }],
   })
@@ -462,6 +512,24 @@ test('dispatch export_image → decodes base64 data URL and writes file to disk'
       content: [{ type: 'text', text: JSON.stringify({ path, width: 10, height: 10 }) }],
     })
     expect(await Bun.file(path).text()).toBe('hello')
+  } finally {
+    await unlink(path)
+  }
+})
+
+test('dispatch export_image on a frame reports strays alongside the written path', async () => {
+  const strays = [{ id: 'shape:b', type: 'geo', x: 9, y: 9, w: 3, h: 4, text: 'out' }]
+  const dispatch = createDispatcher(async () => ({
+    url: 'data:image/png;base64,aGVsbG8=',
+    width: 10,
+    height: 10,
+    strays,
+  }))
+  const path = tempPath('png')
+  try {
+    expect(await dispatch('export_image', { target: 'frame', name: 'f', format: 'png', path })).toEqual({
+      content: [{ type: 'text', text: JSON.stringify({ path, width: 10, height: 10, strays }) }],
+    })
   } finally {
     await unlink(path)
   }
