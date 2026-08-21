@@ -40,6 +40,12 @@ size, how far a label fits before it wraps, which properties each tool exposes, 
 set at all. Change a tool's surface or the layout and update it in the same commit; it has no
 test to fail, so it goes stale silently. (It ships as a plugin — see README.)
 
+Then bump `version` in `.claude-plugin/plugin.json`. An installed plugin is cached under its
+version number, so an unchanged version means the installer sees nothing to do and every
+reader keeps the old skill — `/plugin update` reports "already at the latest version" and is
+telling the truth. Updating the skill without bumping ships the change to the repo and to
+nobody's machine.
+
 The browser app (`browser/src/`) is split by concern: `graph.ts` — pure node/edge layout, no
 tldraw or React imports; `tools.ts` — `runTool` and its editor helpers, including per-agent
 attribution; `connect.ts` — the WS relay wiring; `main.tsx` — the Vite entry and React shell.
