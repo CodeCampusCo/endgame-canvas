@@ -79,6 +79,21 @@ config:
 `CANVAS_AGENT` is optional — set it to give this agent a distinct colour on the canvas; omit it
 to draw in the default style. Now ask the agent to read or draw, and watch the tab.
 
+### The drawing skill
+
+The tools alone don't make a diagram readable. This repo also ships
+`endgame-canvas-diagrams` — the discipline that decides when a picture beats a paragraph, holds a
+diagram to a complexity budget, and runs the read-back loop that catches what a coordinate plan
+can't. Install it as a plugin so it loads in every project, not just this one:
+
+```
+/plugin marketplace add CodeCampusCo/endgame-canvas
+/plugin install endgame-canvas@endgame-canvas
+```
+
+It lives in `skills/endgame-canvas-diagrams/` and is versioned with the code it describes, so the
+numbers in it (node size, label width, which properties the tools expose) stay true.
+
 ## How it works
 
 The **browser tldraw editor is the source of truth.** The MCP server holds no canvas state —

@@ -35,6 +35,11 @@ rest at runtime against the live canvas with a short script that imports
 `createCanvasClient`/`createDispatcher` from `src/server.ts` and drives the editor over the
 relay (a fresh connection, so no MCP-server restart needed).
 
+The skill in `skills/endgame-canvas-diagrams/` documents facts derived from this code — node
+size, how far a label fits before it wraps, which properties each tool exposes, what cannot be
+set at all. Change a tool's surface or the layout and update it in the same commit; it has no
+test to fail, so it goes stale silently. (It ships as a plugin — see README.)
+
 The browser app (`browser/src/`) is split by concern: `graph.ts` — pure node/edge layout, no
 tldraw or React imports; `tools.ts` — `runTool` and its editor helpers, including per-agent
 attribution; `connect.ts` — the WS relay wiring; `main.tsx` — the Vite entry and React shell.
