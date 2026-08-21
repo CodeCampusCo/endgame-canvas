@@ -132,7 +132,10 @@ follows the shapes when either moves.
 - **Labels ≤ ~14 characters.** Measured on the standard 200×100 node: 14 characters fit on one
   line, 15 wrap to two. The real ceiling is *width*, not character count, so all-caps or
   wide-letter text wraps sooner. A node label is a name, not a sentence — push detail into a
-  sticky `create_note` beside the diagram, not into the box.
+  sticky `create_note` beside the diagram, not into the box. Treat this as a guide for
+  choosing names, not a rule that outranks accuracy: **if the right word wraps, use the right
+  word.** A wrapped label is acceptable output, not a defect — arranging a diagram so it reads
+  well by eye is the human's job, and they fix it by dragging in seconds. Never reword to fit.
 - **One accent, on the 1–2 things to look at first.** Shapes take the agent's attribution colour
   by default (set via `CANVAS_AGENT`). Leave the whole diagram in that one colour, then give a
   *different* treatment to only the entry point, the answer, or the one node in trouble. If you
@@ -173,7 +176,6 @@ After drawing, **`read_frame(<frame name>)`** to get the cropped image plus the 
 arrow bindings. Look for the failure modes that a coordinate plan can't reveal:
 
 - boxes overlapping or text spilling outside its box,
-- a label that wrapped to two lines — shorten it,
 - arrows crossing each other (cut an edge, merge two nodes, or split the frame),
 - an arrow that isn't actually bound (it won't appear in the bindings) — recreate it with
   `create_arrow({fromId, toId})`.
