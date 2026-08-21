@@ -222,7 +222,7 @@ const TOOL_DEFS = [
   {
     name: 'read_frame',
     description:
-      "Read one frame's contents: a cropped PNG of its children, their structured shape data, and arrow bindings.",
+      "Read one frame's contents: a cropped PNG of its children, their structured shape data, and arrow bindings. Also reports `strays` — shapes that overlap the frame but are not in it, so they are missing from the image and the shape list. Only present when there are some.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -272,6 +272,11 @@ const TOOL_DEFS = [
         text: { type: 'string' },
         color: { type: 'string' },
         fill: { type: 'string' },
+        parent: {
+          type: 'string',
+          description:
+            "Move the shape into a frame — its name or a shape:... id — or 'page' to take it out of the frame it is in. A shape dragged out of a frame stays out until this puts it back.",
+        },
       },
       required: ['id'],
     },
@@ -396,7 +401,7 @@ const TOOL_DEFS = [
   {
     name: 'export_image',
     description:
-      'Export the whole canvas, a named frame, or the current selection to a PNG or SVG file on disk — for embedding diagrams into documents.',
+      'Export the whole canvas, a named frame, or the current selection to a PNG or SVG file on disk — for embedding diagrams into documents. Exporting a frame also reports `strays` when shapes overlap the frame without belonging to it: they look part of the diagram on screen but are absent from the file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -447,7 +452,10 @@ export function createDispatcher(call: CanvasCall) {
     },
     async read_frame(args) {
       const r = await call('read_frame', args)
-      const text: ToolContent = { type: 'text', text: JSON.stringify({ shapes: r.shapes, bindings: r.bindings, frameId: r.frameId }, null, 2) }
+      // strays only appear when there are some: a frame that is intact reads exactly as before.
+      const payload: Record<string, unknown> = { shapes: r.shapes, bindings: r.bindings, frameId: r.frameId }
+      if (r.strays?.length) payload.strays = r.strays
+      const text: ToolContent = { type: 'text', text: JSON.stringify(payload, null, 2) }
       if (r.url == null) return { content: [text] }
       const data = String(r.url).split(',')[1] // strip "data:image/png;base64,"
       return { content: [{ type: 'image', data, mimeType: 'image/png' }, text] }
@@ -497,7 +505,9 @@ export function createDispatcher(call: CanvasCall) {
       const r = await call('export_image', { target, name, format })
       if (typeof r.svg === 'string') await Bun.write(resolved, r.svg)
       else await Bun.write(resolved, Buffer.from(String(r.url).split(',')[1], 'base64'))
-      return asText(JSON.stringify({ path: resolved, width: r.width, height: r.height }))
+      const out: Record<string, unknown> = { path: resolved, width: r.width, height: r.height }
+      if (r.strays?.length) out.strays = r.strays
+      return asText(JSON.stringify(out))
     },
   }
 

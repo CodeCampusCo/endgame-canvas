@@ -57,6 +57,25 @@ function getFrames(editor: Editor) {
     .filter((s): s is Extract<TLShape, { type: 'frame' }> => s.type === 'frame')
 }
 
+// Shapes that sit over a frame without being its children. tldraw drops a shape from a
+// frame the moment it is dragged past the edge and never takes it back — not when the frame
+// is resized to cover it again, and not when the shape is moved back inside. So a frame can
+// look complete on screen while read_frame and export_image quietly leave those shapes out.
+// Reporting them turns that silent omission into something the caller can see and fix
+// (update_shape's `parent`).
+function straysOver(editor: Editor, frame: TLShape) {
+  const fb = editor.getShapePageBounds(frame)
+  if (!fb) return []
+  return editor
+    .getCurrentPageShapes()
+    .filter((s) => s.type !== 'frame' && s.parentId !== frame.id)
+    .filter((s) => {
+      const b = editor.getShapePageBounds(s)
+      return b != null && b.x < fb.x + fb.w && b.x + b.w > fb.x && b.y < fb.y + fb.h && b.y + b.h > fb.y
+    })
+    .map((s) => shapeSnapshot(editor, s))
+}
+
 function findFrame(editor: Editor, name: string) {
   const frames = getFrames(editor)
   return name.startsWith('shape:')
@@ -172,10 +191,11 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
         const b = getArrowBindings(editor, arrow)
         return { arrowId: arrow.id, start: b.start?.toId ?? null, end: b.end?.toId ?? null }
       })
-    if (children.length === 0) return { url: null, width: 0, height: 0, shapes: [], bindings: [], frameId: frame.id }
+    const strays = straysOver(editor, frame)
+    if (children.length === 0) return { url: null, width: 0, height: 0, shapes: [], bindings: [], frameId: frame.id, strays }
     const { blob, width, height } = await editor.toImage(children, { format: 'png', background: true })
     const url = await blobToDataUrl(blob)
-    return { url, width, height, shapes: children.map((s) => shapeSnapshot(editor, s)), bindings, frameId: frame.id }
+    return { url, width, height, shapes: children.map((s) => shapeSnapshot(editor, s)), bindings, frameId: frame.id, strays }
   }
   if (tool === 'create_shape') {
     const { type, x, y, text } = params
@@ -264,7 +284,7 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     return { id }
   }
   if (tool === 'update_shape') {
-    const { id, x, y, w, h, text, color, fill } = params
+    const { id, x, y, w, h, text, color, fill, parent } = params
     const shape = editor.getShape(id)
     if (!shape) throw new Error('shape not found: ' + id)
     const props: Record<string, unknown> = {}
@@ -288,6 +308,17 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       ...(local ? { x: local.x, y: local.y } : {}),
       props,
     })
+    // Reparent last: reparentShapes rewrites x/y to keep the page position, so it has to see
+    // the position this call just set, not the one it started with.
+    if (parent !== undefined) {
+      if (parent === 'page') {
+        editor.reparentShapes([id], editor.getCurrentPageId())
+      } else {
+        const target = findFrame(editor, parent)
+        if (!target) throw new Error('frame not found: ' + parent)
+        editor.reparentShapes([id], target.id)
+      }
+    }
     return { id }
   }
   if (tool === 'delete_shape') {
@@ -334,10 +365,12 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   if (tool === 'export_image') {
     const { target, name, format } = params
     let shapes: TLShape[]
+    let strays: ReturnType<typeof straysOver> = []
     if (target === 'frame') {
       const frame = findFrame(editor, name)
       if (!frame) throw new Error('frame not found: ' + name)
       shapes = [frame]
+      strays = straysOver(editor, frame)
     } else if (target === 'selection') {
       const ids = editor.getSelectedShapeIds()
       if (ids.length === 0) throw new Error('nothing selected')
@@ -349,11 +382,11 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     if (format === 'svg') {
       const r = await editor.getSvgString(shapes, { background: true })
       if (!r) throw new Error('svg export failed')
-      return { svg: r.svg, width: r.width, height: r.height }
+      return { svg: r.svg, width: r.width, height: r.height, strays }
     }
     const { blob, width, height } = await editor.toImage(shapes, { format, background: true })
     const url = await blobToDataUrl(blob)
-    return { url, width, height }
+    return { url, width, height, strays }
   }
   if (tool === 'create_graph') {
     const { nodes, edges, layout = 'tree', frame, x = 100, y = 100 } = params
