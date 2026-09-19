@@ -235,7 +235,7 @@ export const TOOL_DEFS = [
   {
     name: 'create_arrow',
     description:
-      'Create an arrow bound to two shapes — moving either shape drags the arrow with it.',
+      'Create an arrow bound to two shapes — moving either shape drags the arrow with it. The two must be different shapes: tldraw draws an arrow from a shape to itself as nothing at all.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -262,7 +262,7 @@ export const TOOL_DEFS = [
   {
     name: 'update_shape',
     description:
-      'Edit an existing shape — move, resize, relabel, or recolour it. A box tldraw grew to fit an oversized label keeps that growth through any resize — it measures h plus the growth — because only a change of text makes tldraw recompute it.',
+      'Edit an existing shape — move, resize, relabel, or recolour it. Resizing a box that carries a label re-measures the label against the new size, so a narrower box grows taller rather than hiding words.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -285,7 +285,8 @@ export const TOOL_DEFS = [
   },
   {
     name: 'delete_shape',
-    description: 'Delete one or more shapes by id.',
+    description:
+      'Delete one or more shapes by id. Deleting a frame deletes everything inside it, and the count reports every shape that left the page, not how many ids were passed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -476,7 +477,7 @@ export const TOOL_DEFS = [
   {
     name: 'create_graph',
     description:
-      'Build a node-and-edge diagram in one step: lay out nodes (tree or grid), create each as a shape, and connect edges with bound arrows. Optionally wrap it all in a named frame. Works for any graph — flowchart, org chart, dependency graph, etc. Reports `issues` when a label outgrew its node or two nodes overlap.',
+      'Build a node-and-edge diagram in one step: lay out nodes (tree or grid), create each as a shape, and connect edges with bound arrows. Optionally wrap it all in a named frame. Works for any graph — flowchart, org chart, dependency graph, etc. Reports `issues` when a label outgrew its node or two nodes overlap. Node keys must be unique, and an edge from a node to itself is refused.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -561,7 +562,7 @@ function schemaError(name: string, args: unknown): string | null {
   const given = (args ?? {}) as Record<string, unknown>
   const schema = def.inputSchema as unknown as {
     required?: string[]
-    properties?: Record<string, { enum?: string[] }>
+    properties?: Record<string, { enum?: string[]; minItems?: number }>
   }
   const missing = (schema.required ?? []).filter((k) => given[k] === undefined)
   if (missing.length > 0) {
@@ -571,6 +572,9 @@ function schemaError(name: string, args: unknown): string | null {
     const value = given[key]
     if (spec.enum && value !== undefined && !spec.enum.includes(value as string)) {
       return name + ': ' + key + ' must be one of ' + spec.enum.join(', ') + ' — got ' + JSON.stringify(value)
+    }
+    if (spec.minItems != null && Array.isArray(value) && value.length < spec.minItems) {
+      return name + ': ' + key + ' needs at least ' + spec.minItems + ' items — got ' + value.length
     }
   }
   return null
@@ -681,6 +685,9 @@ export function createDispatcher(call: CanvasCall) {
     },
     async export_image(args) {
       const { target, format, path, name } = args
+      // The one conditional requirement in the whole tool set, and the only one a JSON schema
+      // cannot state — so it is checked here rather than left to fail as a TypeError downstream.
+      if (target === 'frame' && !name) throw new Error('export_image: name is required when target is frame')
       const resolved = resolve(path)
       if (!resolved.startsWith(process.cwd() + '/')) {
         throw new Error(`path must be inside the server working directory: ${path}`)

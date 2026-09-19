@@ -109,6 +109,9 @@ create_graph({
 - Each layer is ordered by the mean position of its neighbours (barycentre), swept both
   directions, which uncrosses edges automatically.
 - Parents are centred over the children they point at; leaves are centred under their parents.
+- Node `key`s must be unique, and an edge from a node to itself is refused — tldraw draws a
+  self-arrow as nothing at all and strands its label. For a state machine's self-transition, say
+  it in the node's own label or in a `create_note` beside the diagram.
 - The `frame` is re-fitted to what actually got drawn, so a node tldraw grew to fit an oversized
   label sits inside it rather than being clipped at its edge. Two limits worth knowing: the
   *rows* are still spaced for an ungrown node, so a grown one reaches into the row beneath it and
@@ -218,7 +221,7 @@ absent when there is nothing wrong, so its presence is itself the signal.
 
 | `kind` | What happened | The fix |
 |---|---|---|
-| `text-overflow` | The label did not fit, so tldraw grew the box by `grewBy` px. It is now taller than the layout assumed and may be touching whatever is below it. | **Only a shorter label clears it.** tldraw recomputes the growth when the text changes and at no other time, so no resize will shift it — a grown box measures `h + grewBy`, which is the `h` `read_frame` hands you. And never narrow a box to tidy it: a geo label is *clipped* by its box, so the words just vanish. A label that merely *wrapped* is **not** reported: that is acceptable output, not a defect. Sticky notes are never reported either — growing to fit is what they are for. |
+| `text-overflow` | The label did not fit, so tldraw grew the box by `grewBy` px. It is now taller than the layout assumed and may be touching whatever is below it. | Shorten the label, or `update_shape({id, w, h})` to give it more room — either way the label is re-measured against the new size and the issue clears once it fits. A grown box measures `h + grewBy`, which is the `h` `read_frame` hands you. Watch what a *narrower* box costs: the label re-wraps into a taller column, so `grewBy` goes **up**. A label that merely *wrapped* is **not** reported: that is acceptable output, not a defect. Sticky notes are never reported either — growing to fit is what they are for. |
 | `overlap` | Two boxes share pixels — `id` and `with`. | Move one: `place_shape`, `nudge_shapes`, or `update_shape`. |
 | `unbound-arrow` | An arrow is bound at only one end (`missing` says which). It looks connected and comes adrift the moment that shape moves. | `delete_shape` it and redo with `create_arrow({fromId, toId})`. |
 | `clipped` | A child of the frame sits entirely outside it. It is still a child — so it is in the shape list and is **not** a stray — but a frame clips its children, so it renders nowhere: not on screen, not in the image, not in an export. | Move it back inside with `nudge_shapes` or `update_shape({id, x, y})`, or lift it out of the frame with `update_shape({id, parent: 'page'})` to make it visible where it is. |

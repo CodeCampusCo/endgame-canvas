@@ -84,7 +84,10 @@ function straysOver(editor: Editor, frame: TLShape) {
   if (!fb) return []
   return editor
     .getCurrentPageShapes()
-    .filter((s) => s.type !== 'frame' && s.parentId !== frame.id)
+    // hasAncestor, not parentId: a shape inside a frame inside this one is already part of the
+    // picture and part of the export. Calling it a stray would send the caller to reparent it,
+    // which would tear it out of the inner frame for nothing.
+    .filter((s) => s.type !== 'frame' && !editor.hasAncestor(s, frame.id))
     .filter((s) => {
       const b = editor.getShapePageBounds(s)
       return b != null && b.x < fb.x + fb.w && b.x + b.w > fb.x && b.y < fb.y + fb.h && b.y + b.h > fb.y
@@ -94,8 +97,10 @@ function straysOver(editor: Editor, frame: TLShape) {
 
 function findFrame(editor: Editor, name: string) {
   const frames = getFrames(editor)
+  // A "shape:" prefix means "this is an id", but nothing stops a human naming a frame that way —
+  // and then every tool that takes a name would lose it. Fall back to the name.
   return name.startsWith('shape:')
-    ? frames.find((s) => s.id === name)
+    ? (frames.find((s) => s.id === name) ?? frames.find((s) => s.props.name === name))
     : frames.find((s) => s.props.name === name)
 }
 
@@ -103,6 +108,10 @@ function findFrame(editor: Editor, name: string) {
 // bound at both ends (start→fromShapeId, end→toShapeId) so moving either shape
 // drags the arrow with it.
 function bindArrow(editor: Editor, fromShapeId: TLShapeId, toShapeId: TLShapeId, text?: string, color?: string) {
+  // tldraw routes an arrow between two terminals; given one shape twice it produces a 0x0 shape
+  // that draws nothing and leaves the label floating, while both ends count as bound so no check
+  // can see it. Refuse instead.
+  if (fromShapeId === toShapeId) throw new Error('an arrow needs two different shapes, got the same one twice: ' + fromShapeId)
   if (!editor.getShape(fromShapeId)) throw new Error('shape not found: ' + fromShapeId)
   if (!editor.getShape(toShapeId)) throw new Error('shape not found: ' + toShapeId)
   const arrowId = createShapeId()
@@ -182,7 +191,8 @@ const CLUSTERING_MIN: Record<string, number> = {
 // nudgeShapes reads each shape without a null check, so one stale id would throw mid-batch.
 // Filter first, and refuse a call that would move nothing rather than report a silent success.
 function existingIds(editor: Editor, ids: string[]): TLShapeId[] {
-  const found = (ids ?? []).filter((id) => editor.getShape(id as TLShapeId)) as TLShapeId[]
+  // Deduplicate: the same id twice would be counted twice and, for a move, applied twice.
+  const found = [...new Set(ids ?? [])].filter((id) => editor.getShape(id as TLShapeId)) as TLShapeId[]
   if (found.length === 0) throw new Error('no shapes found for ids: ' + (ids ?? []).join(', '))
   return found
 }
@@ -384,6 +394,19 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
         ...(local ? { x: local.x, y: local.y } : {}),
         props,
       })
+      // tldraw re-measures a label only when the text itself changes — and it compares for
+      // equality, so re-sending the same string does nothing either. A resize therefore leaves
+      // the old growth behind: narrow a box and the label is cropped while text-overflow still
+      // reports the shortfall measured at the old width. Write a marker into the text and take it
+      // straight back out, inside this same transaction so nothing intermediate is ever drawn,
+      // and the label ends up measured against the size that was actually asked for.
+      if (shape.type === 'geo' && Object.keys(size).length > 0) {
+        const label = text ?? editor.getShapeUtil(shape).getText(shape) ?? ''
+        if (label !== '') {
+          editor.updateShape({ id, type: shape.type, props: { richText: toRichText(label + '\u200B') } })
+          editor.updateShape({ id, type: shape.type, props: { richText: toRichText(label) } })
+        }
+      }
       // Reparent last: reparentShapes rewrites x/y to keep the page position, so it has to see
       // the position this call just set, not the one it started with.
       if (parent !== undefined) {
@@ -400,9 +423,12 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   }
   if (tool === 'delete_shape') {
     const { ids } = params
-    const existing = ids.filter((id: any) => editor.getShape(id))
+    const existing = [...new Set<string>(ids)].filter((id) => editor.getShape(id as TLShapeId)) as TLShapeId[]
+    // Count what actually left the page, not how many ids were handed in: deleting a frame takes
+    // its children with it, so the two numbers are rarely the same.
+    const before = editor.getCurrentPageShapes().length
     editor.deleteShapes(existing)
-    return { deleted: existing.length }
+    return { deleted: before - editor.getCurrentPageShapes().length }
   }
   if (tool === 'zoom_to_frame') {
     const frame = findFrame(editor, params.name)
@@ -416,7 +442,7 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     const { ids } = params
     // editor.select() stores whatever ids it's given verbatim — it does not check
     // that they reference existing shapes — so filter first for an honest count.
-    const existing = ids.filter((id: any) => editor.getShape(id))
+    const existing = [...new Set<string>(ids)].filter((id) => editor.getShape(id as TLShapeId)) as TLShapeId[]
     editor.select(...existing)
     return { selected: editor.getSelectedShapeIds().length }
   }
@@ -473,13 +499,22 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   }
   if (tool === 'create_graph') {
     const { nodes, edges, layout = 'tree', frame, x = 100, y = 100 } = params
+    // Node keys index everything downstream — the positions map, the id map the caller gets back,
+    // and the issue check. A missing or repeated key silently collapses several nodes into one
+    // entry: they are all drawn, stacked on the same spot, and the check only ever sees the last.
+    const keys = new Set<string>()
+    for (const node of nodes) {
+      if (typeof node?.key !== 'string' || node.key === '') throw new Error('every node needs a key')
+      if (keys.has(node.key)) throw new Error('duplicate node key: ' + node.key)
+      keys.add(node.key)
+    }
     const positions = graphPositions(nodes, edges, layout, x, y)
 
     const ids: Record<string, TLShapeId> = {}
     const arrowIds: string[] = []
     let frameId: TLShapeId | undefined
     editor.run(() => {
-      if (frame) {
+      if (frame && positions.size > 0) {
         let minX = Infinity
         let minY = Infinity
         let maxX = -Infinity
@@ -507,8 +542,10 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       }
 
       for (const edge of edges) {
-        if (!(edge.from in ids)) throw new Error('unknown node key in edge: ' + edge.from)
-        if (!(edge.to in ids)) throw new Error('unknown node key in edge: ' + edge.to)
+        // hasOwn, not `in`: 'toString' and friends are on every object's prototype and would
+        // sail past this check straight into a confusing shape-not-found from tldraw.
+        if (!Object.hasOwn(ids, edge.from)) throw new Error('unknown node key in edge: ' + edge.from)
+        if (!Object.hasOwn(ids, edge.to)) throw new Error('unknown node key in edge: ' + edge.to)
         arrowIds.push(bindArrow(editor, ids[edge.from], ids[edge.to], edge.text, color))
       }
 
@@ -555,6 +592,11 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   // falling through to the unknown-tool throw at the bottom.
   if (Object.hasOwn(BATCH_OPS, tool)) {
     let ids = existingIds(editor, params.ids)
+    // tldraw moves a frame's children along with the frame, so a list holding both — which is
+    // exactly what list_frames' `id` and `shapeIds` invite — would move every child twice and
+    // quietly stretch the diagram apart inside its own frame.
+    const listed = ids
+    ids = ids.filter((id) => !listed.some((other) => other !== id && editor.hasAncestor(id, other)))
     if (Object.hasOwn(CLUSTERING_MIN, tool)) {
       const min = CLUSTERING_MIN[tool]
       ids = ids.filter((id) => {

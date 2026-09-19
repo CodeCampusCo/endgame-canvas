@@ -962,3 +962,39 @@ test('a name inherited from Object.prototype is an unknown tool, not a callable 
     expect({ name, text: (r.content[0] as any).text }).toEqual({ name, text: `unknown tool: ${name}` })
   }
 })
+
+test('an array shorter than the schema says is refused', async () => {
+  let called = false
+  const dispatch = createDispatcher(async () => { called = true; return {} })
+  const r = await dispatch('create_line', { points: [{ x: 0, y: 0 }] })
+  expect(r.isError).toBe(true)
+  expect((r.content[0] as any).text).toBe('create_line: points needs at least 2 items — got 1')
+  expect(called).toBe(false)
+})
+
+test('export_image names the one requirement a schema cannot state, instead of a TypeError', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  const r = await dispatch('export_image', { target: 'frame', format: 'png', path: 'test-output/x.png' })
+  expect(r.isError).toBe(true)
+  expect((r.content[0] as any).text).toBe('export_image: name is required when target is frame')
+})
+
+test('every minItems the tools publish is enforced, not just the one someone remembered', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  const withMin = (TOOL_DEFS as any[]).flatMap((t) =>
+    Object.entries(t.inputSchema.properties ?? {})
+      .filter(([, spec]: [string, any]) => spec.minItems)
+      .map(([key, spec]: [string, any]) => [t.name, key, spec.minItems, t.inputSchema.required ?? []] as const),
+  )
+  expect(withMin.length).toBeGreaterThan(0)
+  for (const [name, key, min, required] of withMin) {
+    const props = (TOOL_DEFS as any[]).find((t) => t.name === name).inputSchema.properties ?? {}
+    const args: Record<string, unknown> = Object.fromEntries(
+      required.map((k: string) => [k, props[k]?.enum ? props[k].enum[0] : 'x']),
+    )
+    args[key] = []
+    const r = await dispatch(name, args)
+    expect({ name, key, isError: r.isError }).toEqual({ name, key, isError: true })
+    expect((r.content[0] as any).text).toContain(`needs at least ${min} items`)
+  }
+})
