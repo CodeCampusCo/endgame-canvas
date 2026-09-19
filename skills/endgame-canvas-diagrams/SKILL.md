@@ -109,6 +109,10 @@ create_graph({
 - Each layer is ordered by the mean position of its neighbours (barycentre), swept both
   directions, which uncrosses edges automatically.
 - Parents are centred over the children they point at; leaves are centred under their parents.
+- The `frame` is re-fitted to what actually got drawn, so a node tldraw grew to fit an oversized
+  label sits inside it rather than being clipped at its edge. The *rows* are still spaced for an
+  ungrown node, though, so a grown one reaches into the row beneath it and comes back as an
+  `overlap` alongside the `text-overflow`. Shorten the label, or give that node its own frame.
 
 **Because of that ordering pass, re-ordering `nodes[]` is no longer the lever it once was** — the
 layout re-sorts each layer regardless, and `nodes[]` order only breaks ties between nodes with no

@@ -488,6 +488,7 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
 
     const ids: Record<string, TLShapeId> = {}
     const arrowIds: string[] = []
+    let frameId: TLShapeId | undefined
     editor.run(() => {
       if (frame) {
         let minX = Infinity
@@ -501,8 +502,9 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
           maxY = Math.max(maxY, py + NODE_H)
         }
         const pad = 40
+        frameId = createShapeId()
         editor.createShape({
-          id: createShapeId(),
+          id: frameId,
           type: 'frame',
           x: minX - pad,
           y: minY - pad,
@@ -519,6 +521,22 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
         if (!(edge.from in ids)) throw new Error('unknown node key in edge: ' + edge.from)
         if (!(edge.to in ids)) throw new Error('unknown node key in edge: ' + edge.to)
         arrowIds.push(bindArrow(editor, ids[edge.from], ids[edge.to], edge.text, color))
+      }
+
+      // The frame above was sized from the layout, which assumes every node is NODE_H tall. A
+      // node whose label did not fit is taller than that by the time it exists, and a frame
+      // clips its children — so it would hang out of the bottom of its own frame and simply not
+      // render. Re-fit to what was actually drawn. Measured from the frame's own origin so the
+      // frame never moves, which would drag every child along with it.
+      if (frameId) {
+        const fb = editor.getShapePageBounds(frameId)!
+        const drawn = [...Object.values(ids), ...arrowIds]
+          .map((id) => editor.getShapePageBounds(id as TLShapeId))
+          .filter((b) => b != null)
+        const pad = 40
+        const w = Math.max(fb.w, ...drawn.map((b) => b!.x + b!.w - fb.x + pad))
+        const h = Math.max(fb.h, ...drawn.map((b) => b!.y + b!.h - fb.y + pad))
+        if (w !== fb.w || h !== fb.h) editor.updateShape({ id: frameId, type: 'frame', props: { w, h } })
       }
     })
 
