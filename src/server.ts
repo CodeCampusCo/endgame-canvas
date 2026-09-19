@@ -552,6 +552,19 @@ export const TOOL_DEFS = [
 
 const DEFS_BY_NAME = new Map(TOOL_DEFS.map((t) => [t.name, t]))
 
+function matchesType(type: string | undefined, value: unknown): boolean {
+  switch (type) {
+    case 'array': return Array.isArray(value)
+    case 'object': return typeof value === 'object' && value !== null && !Array.isArray(value)
+    case 'number': return typeof value === 'number' && Number.isFinite(value)
+    case 'string': return typeof value === 'string'
+    case 'boolean': return typeof value === 'boolean'
+    default: return true
+  }
+}
+
+const describe = (value: unknown) => (Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value)
+
 // The MCP SDK does not check inputSchema, so an unchecked call reaches the canvas and matches
 // nothing — a no-op reported as a success.
 function schemaError(name: string, args: unknown): string | null {
@@ -560,7 +573,7 @@ function schemaError(name: string, args: unknown): string | null {
   const given = (args ?? {}) as Record<string, unknown>
   const schema = def.inputSchema as unknown as {
     required?: string[]
-    properties?: Record<string, { enum?: string[]; minItems?: number }>
+    properties?: Record<string, { type?: string; enum?: string[]; minItems?: number }>
   }
   const missing = (schema.required ?? []).filter((k) => given[k] === undefined)
   if (missing.length > 0) {
@@ -570,6 +583,9 @@ function schemaError(name: string, args: unknown): string | null {
     const value = given[key]
     if (spec.enum && value !== undefined && !spec.enum.includes(value as string)) {
       return name + ': ' + key + ' must be one of ' + spec.enum.join(', ') + ' — got ' + JSON.stringify(value)
+    }
+    if (value !== undefined && !matchesType(spec.type, value)) {
+      return name + ': ' + key + ' must be ' + spec.type + ' — got ' + describe(value)
     }
     if (spec.minItems != null && Array.isArray(value) && value.length < spec.minItems) {
       return name + ': ' + key + ' needs at least ' + spec.minItems + ' items — got ' + value.length

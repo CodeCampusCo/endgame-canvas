@@ -927,6 +927,17 @@ test('an omitted optional enum is not an error — the browser applies its defau
   expect(seen).toEqual({ tool: 'create_graph', params: args })
 })
 
+// A value that satisfies whatever the schema declares for a field, so a sweep trips the one
+// constraint it is testing rather than a neighbour.
+function sampleFor(spec: any): unknown {
+  if (spec?.enum) return spec.enum[0]
+  if (spec?.type === 'number') return 0
+  if (spec?.type === 'array') return [{ x: 0, y: 0 }, { x: 1, y: 1 }]
+  if (spec?.type === 'object') return {}
+  if (spec?.type === 'boolean') return true
+  return 'x'
+}
+
 test('every enum the tools publish is checked, not just the ones someone remembered', async () => {
   const dispatch = createDispatcher(async () => ({}))
   const withEnums = (TOOL_DEFS as any[]).flatMap((t) =>
@@ -936,11 +947,9 @@ test('every enum the tools publish is checked, not just the ones someone remembe
   )
   expect(withEnums.length).toBeGreaterThan(5)
   for (const [name, key, required] of withEnums) {
-    // Fill every required field with something valid — including other enums — so the field
-    // under test is what fires, not a neighbour.
     const props = (TOOL_DEFS as any[]).find((t) => t.name === name).inputSchema.properties ?? {}
     const args: Record<string, unknown> = Object.fromEntries(
-      required.map((k: string) => [k, props[k]?.enum ? props[k].enum[0] : 'x']),
+      required.map((k: string) => [k, sampleFor(props[k])]),
     )
     args[key] = 'definitely-not-a-valid-value'
     const r = await dispatch(name, args)
@@ -984,11 +993,48 @@ test('every minItems the tools publish is enforced, not just the one someone rem
   for (const [name, key, min, required] of withMin) {
     const props = (TOOL_DEFS as any[]).find((t) => t.name === name).inputSchema.properties ?? {}
     const args: Record<string, unknown> = Object.fromEntries(
-      required.map((k: string) => [k, props[k]?.enum ? props[k].enum[0] : 'x']),
+      required.map((k: string) => [k, sampleFor(props[k])]),
     )
     args[key] = []
     const r = await dispatch(name, args)
     expect({ name, key, isError: r.isError }).toEqual({ name, key, isError: true })
     expect((r.content[0] as any).text).toContain(`needs at least ${min} items`)
+  }
+})
+
+test('a value of the wrong type is named, instead of erroring somewhere inside tldraw', async () => {
+  let called = false
+  const dispatch = createDispatcher(async () => { called = true; return {} })
+  const cases: [string, Record<string, unknown>, string][] = [
+    ['create_line', { points: 'hello' }, 'create_line: points must be array — got string'],
+    ['select', { ids: 'shape:a' }, 'select: ids must be array — got string'],
+    ['create_shape', { type: 'rectangle', x: '100', y: 0 }, 'create_shape: x must be number — got string'],
+    ['create_frame', { name: 'f', x: 0, y: 0, w: null, h: 10 }, 'create_frame: w must be number — got null'],
+    ['nudge_shapes', { ids: ['shape:a'], dx: 0, dy: [] }, 'nudge_shapes: dy must be number — got array'],
+  ]
+  for (const [tool, args, message] of cases) {
+    const r = await dispatch(tool, args)
+    expect({ tool, text: (r.content[0] as any).text }).toEqual({ tool, text: message })
+  }
+  expect(called).toBe(false)
+})
+
+test('every declared type the tools publish is enforced', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  const typed = (TOOL_DEFS as any[]).flatMap((t) =>
+    Object.entries(t.inputSchema.properties ?? {})
+      .filter(([, spec]: [string, any]) => ['array', 'number', 'boolean'].includes(spec.type))
+      .map(([key, spec]: [string, any]) => [t.name, key, spec.type, t.inputSchema.required ?? []] as const),
+  )
+  expect(typed.length).toBeGreaterThan(10)
+  for (const [name, key, type, required] of typed) {
+    const props = (TOOL_DEFS as any[]).find((t) => t.name === name).inputSchema.properties ?? {}
+    const args: Record<string, unknown> = Object.fromEntries(
+      required.map((k: string) => [k, sampleFor(props[k])]),
+    )
+    args[key] = 'not-a-' + type
+    const r = await dispatch(name, args)
+    expect({ name, key, isError: r.isError }).toEqual({ name, key, isError: true })
+    expect((r.content[0] as any).text).toContain(`${key} must be ${type}`)
   }
 })
