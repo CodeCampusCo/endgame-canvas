@@ -1,5 +1,6 @@
 import { type Editor, type TLShape, type TLShapeId, type IndexKey, toRichText, createShapeId, getArrowBindings, getIndices, PageRecordType } from 'tldraw'
 import { graphPositions, NODE_W, NODE_H } from './graph'
+import { findIssues, type CheckShape } from './checks'
 
 // Real tldraw DefaultColorStyle enum values (verified in
 // @tldraw/tlschema/dist-cjs/styles/TLColorStyle.js: defaultColorNames). Excludes
@@ -51,6 +52,20 @@ function shapeSnapshot(editor: Editor, s: TLShape) {
   }
 }
 
+// Page bounds already include growY; the raw growY says whether the box was grown at all.
+function checkShape(editor: Editor, s: TLShape): CheckShape {
+  const b = editor.getShapePageBounds(s)
+  return {
+    id: s.id,
+    type: s.type,
+    x: b?.x ?? 0,
+    y: b?.y ?? 0,
+    w: b?.w ?? 0,
+    h: b?.h ?? 0,
+    growY: (s.props as { growY?: number }).growY,
+  }
+}
+
 function getFrames(editor: Editor) {
   return editor
     .getCurrentPageShapes()
@@ -68,7 +83,8 @@ function straysOver(editor: Editor, frame: TLShape) {
   if (!fb) return []
   return editor
     .getCurrentPageShapes()
-    .filter((s) => s.type !== 'frame' && s.parentId !== frame.id)
+    // hasAncestor, not parentId: a shape in a nested frame is already inside this one.
+    .filter((s) => s.type !== 'frame' && !editor.hasAncestor(s, frame.id))
     .filter((s) => {
       const b = editor.getShapePageBounds(s)
       return b != null && b.x < fb.x + fb.w && b.x + b.w > fb.x && b.y < fb.y + fb.h && b.y + b.h > fb.y
@@ -78,8 +94,9 @@ function straysOver(editor: Editor, frame: TLShape) {
 
 function findFrame(editor: Editor, name: string) {
   const frames = getFrames(editor)
+  // A frame can be *named* "shape:...", so fall back to a name match.
   return name.startsWith('shape:')
-    ? frames.find((s) => s.id === name)
+    ? (frames.find((s) => s.id === name) ?? frames.find((s) => s.props.name === name))
     : frames.find((s) => s.props.name === name)
 }
 
@@ -87,6 +104,9 @@ function findFrame(editor: Editor, name: string) {
 // bound at both ends (start→fromShapeId, end→toShapeId) so moving either shape
 // drags the arrow with it.
 function bindArrow(editor: Editor, fromShapeId: TLShapeId, toShapeId: TLShapeId, text?: string, color?: string) {
+  // tldraw draws a self-arrow as a 0x0 shape: nothing on screen, and bound at both ends, so no
+  // check can see it.
+  if (fromShapeId === toShapeId) throw new Error('an arrow needs two different shapes, got the same one twice: ' + fromShapeId)
   if (!editor.getShape(fromShapeId)) throw new Error('shape not found: ' + fromShapeId)
   if (!editor.getShape(toShapeId)) throw new Error('shape not found: ' + toShapeId)
   const arrowId = createShapeId()
@@ -138,6 +158,35 @@ function createGeoNode(editor: Editor, geo: string, x: number, y: number, text: 
   return id
 }
 
+// tldraw's own multi-shape moves. Targets are always explicit ids; list_frames reports a frame's
+// shapeIds for the "everything in this frame" case.
+const BATCH_OPS: Record<string, (editor: Editor, ids: TLShapeId[], p: any) => void> = {
+  nudge_shapes: (e, ids, p) => e.nudgeShapes(ids, { x: p.dx, y: p.dy }),
+  align_shapes: (e, ids, p) => e.alignShapes(ids, p.edge),
+  distribute_shapes: (e, ids, p) => e.distributeShapes(ids, p.axis),
+  stack_shapes: (e, ids, p) => e.stackShapes(ids, p.axis, p.gap),
+  pack_shapes: (e, ids, p) => e.packShapes(ids, p.gap),
+  flip_shapes: (e, ids, p) => e.flipShapes(ids, p.axis),
+}
+
+// These four merge shapes joined by an arrow that is itself in the id list into one cluster, then
+// return early below this many clusters — so a connected diagram would move nothing. flip_shapes
+// does no clustering.
+const CLUSTERING_MIN: Record<string, number> = {
+  align_shapes: 2,
+  distribute_shapes: 3,
+  stack_shapes: 2,
+  pack_shapes: 2,
+}
+
+// nudgeShapes reads each shape without a null check, so stale ids must not reach it.
+function existingIds(editor: Editor, ids: string[]): TLShapeId[] {
+  // Deduplicate: a repeated id would be moved, and counted, twice.
+  const found = [...new Set(ids ?? [])].filter((id) => editor.getShape(id as TLShapeId)) as TLShapeId[]
+  if (found.length === 0) throw new Error('no shapes found for ids: ' + (ids ?? []).join(', '))
+  return found
+}
+
 export async function runTool(editor: Editor, tool: string, params: any, agent?: string) {
   // Absent agent (no CANVAS_AGENT, e.g. an unlabelled probe) → undefined, so every
   // ...(color ? {...} : {}) spread below is a no-op and tldraw's own default applies —
@@ -167,6 +216,8 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   if (tool === 'list_frames') {
     return getFrames(editor).map((s) => {
       const b = editor.getShapePageBounds(s)
+      // shapeIds feeds the batch tools without the raster read_frame would cost.
+      const childIds = editor.getSortedChildIdsForParent(s.id)
       return {
         id: s.id,
         name: s.props.name,
@@ -174,7 +225,8 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
         y: b?.y,
         w: b?.w,
         h: b?.h,
-        shapeCount: editor.getSortedChildIdsForParent(s.id).length,
+        shapeCount: childIds.length,
+        shapeIds: childIds,
       }
     })
   }
@@ -192,10 +244,20 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
         return { arrowId: arrow.id, start: b.start?.toId ?? null, end: b.end?.toId ?? null }
       })
     const strays = straysOver(editor, frame)
-    if (children.length === 0) return { url: null, width: 0, height: 0, shapes: [], bindings: [], frameId: frame.id, strays }
-    const { blob, width, height } = await editor.toImage(children, { format: 'png', background: true })
-    const url = await blobToDataUrl(blob)
-    return { url, width, height, shapes: children.map((s) => shapeSnapshot(editor, s)), bindings, frameId: frame.id, strays }
+    const issues = findIssues(children.map((s) => checkShape(editor, s)), bindings, editor.getShapePageBounds(frame))
+    if (children.length === 0) return { url: null, width: 0, height: 0, shapes: [], bindings: [], frameId: frame.id, strays, issues }
+    // toImage throws on a zero-area region, which happens when every child is clipped away.
+    // Keep the payload; the issues explain the missing picture.
+    let url: string | null = null
+    let width = 0
+    let height = 0
+    try {
+      const img = await editor.toImage(children, { format: 'png', background: true })
+      width = img.width
+      height = img.height
+      url = await blobToDataUrl(img.blob)
+    } catch {}
+    return { url, width, height, shapes: children.map((s) => shapeSnapshot(editor, s)), bindings, frameId: frame.id, strays, issues }
   }
   if (tool === 'create_shape') {
     const { type, x, y, text } = params
@@ -287,9 +349,10 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     const { id, x, y, w, h, text, color, fill, parent } = params
     const shape = editor.getShape(id)
     if (!shape) throw new Error('shape not found: ' + id)
+    const size: Record<string, unknown> = {}
+    if (w !== undefined) size.w = w
+    if (h !== undefined) size.h = h
     const props: Record<string, unknown> = {}
-    if (w !== undefined) props.w = w
-    if (h !== undefined) props.h = h
     if (color !== undefined) props.color = color
     if (fill !== undefined) props.fill = fill
     if (text !== undefined) {
@@ -302,30 +365,48 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       const pagePoint = { x: x ?? pb!.x, y: y ?? pb!.y }
       local = editor.getPointInParentSpace(shape, pagePoint)
     }
-    editor.updateShape({
-      id,
-      type: shape.type,
-      ...(local ? { x: local.x, y: local.y } : {}),
-      props,
-    })
-    // Reparent last: reparentShapes rewrites x/y to keep the page position, so it has to see
-    // the position this call just set, not the one it started with.
-    if (parent !== undefined) {
-      if (parent === 'page') {
-        editor.reparentShapes([id], editor.getCurrentPageId())
-      } else {
-        const target = findFrame(editor, parent)
-        if (!target) throw new Error('frame not found: ' + parent)
-        editor.reparentShapes([id], target.id)
+    editor.run(() => {
+      // Size first, separately: tldraw measures a label against the height the shape had when the
+      // update arrived.
+      if (Object.keys(size).length > 0) editor.updateShape({ id, type: shape.type, props: size })
+      editor.updateShape({
+        id,
+        type: shape.type,
+        ...(local ? { x: local.x, y: local.y } : {}),
+        props,
+      })
+      // tldraw re-measures a label only when the text changes, and compares for equality — so
+      // resending the same string is a no-op. Change it and change it back, in this transaction,
+      // to measure the label against the size just set. Never reset growY directly: that crops
+      // the label and leaves nothing to report it.
+      if (shape.type === 'geo' && Object.keys(size).length > 0) {
+        const label = text ?? editor.getShapeUtil(shape).getText(shape) ?? ''
+        if (label !== '') {
+          editor.updateShape({ id, type: shape.type, props: { richText: toRichText(label + '\u200B') } })
+          editor.updateShape({ id, type: shape.type, props: { richText: toRichText(label) } })
+        }
       }
-    }
+      // Reparent last: reparentShapes rewrites x/y to keep the page position, so it has to see
+      // the position this call just set, not the one it started with.
+      if (parent !== undefined) {
+        if (parent === 'page') {
+          editor.reparentShapes([id], editor.getCurrentPageId())
+        } else {
+          const target = findFrame(editor, parent)
+          if (!target) throw new Error('frame not found: ' + parent)
+          editor.reparentShapes([id], target.id)
+        }
+      }
+    })
     return { id }
   }
   if (tool === 'delete_shape') {
     const { ids } = params
-    const existing = ids.filter((id: any) => editor.getShape(id))
+    const existing = [...new Set<string>(ids)].filter((id) => editor.getShape(id as TLShapeId)) as TLShapeId[]
+    // Deleting a frame takes its children too, so count what left the page.
+    const before = editor.getCurrentPageShapes().length
     editor.deleteShapes(existing)
-    return { deleted: existing.length }
+    return { deleted: before - editor.getCurrentPageShapes().length }
   }
   if (tool === 'zoom_to_frame') {
     const frame = findFrame(editor, params.name)
@@ -339,7 +420,7 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     const { ids } = params
     // editor.select() stores whatever ids it's given verbatim — it does not check
     // that they reference existing shapes — so filter first for an honest count.
-    const existing = ids.filter((id: any) => editor.getShape(id))
+    const existing = [...new Set<string>(ids)].filter((id) => editor.getShape(id as TLShapeId)) as TLShapeId[]
     editor.select(...existing)
     return { selected: editor.getSelectedShapeIds().length }
   }
@@ -347,6 +428,10 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     const { name } = params
     const id = PageRecordType.createId()
     editor.createPage({ id, name })
+    // createPage is a silent no-op at tldraw's page cap.
+    if (!editor.getPage(id)) {
+      throw new Error('page not created: the board is at tldraw\'s limit of ' + editor.options.maxPages + ' pages — delete one in the browser first')
+    }
     return { id }
   }
   if (tool === 'list_pages') {
@@ -390,12 +475,21 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   }
   if (tool === 'create_graph') {
     const { nodes, edges, layout = 'tree', frame, x = 100, y = 100 } = params
+    // Keys index the positions map and the returned ids, so a repeat collapses several nodes into
+    // one entry: all drawn, stacked on one spot, only the last one tracked.
+    const keys = new Set<string>()
+    for (const node of nodes) {
+      if (typeof node?.key !== 'string' || node.key === '') throw new Error('every node needs a key')
+      if (keys.has(node.key)) throw new Error('duplicate node key: ' + node.key)
+      keys.add(node.key)
+    }
     const positions = graphPositions(nodes, edges, layout, x, y)
 
     const ids: Record<string, TLShapeId> = {}
     const arrowIds: string[] = []
+    let frameId: TLShapeId | undefined
     editor.run(() => {
-      if (frame) {
+      if (frame && positions.size > 0) {
         let minX = Infinity
         let minY = Infinity
         let maxX = -Infinity
@@ -407,8 +501,9 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
           maxY = Math.max(maxY, py + NODE_H)
         }
         const pad = 40
+        frameId = createShapeId()
         editor.createShape({
-          id: createShapeId(),
+          id: frameId,
           type: 'frame',
           x: minX - pad,
           y: minY - pad,
@@ -422,13 +517,30 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       }
 
       for (const edge of edges) {
-        if (!(edge.from in ids)) throw new Error('unknown node key in edge: ' + edge.from)
-        if (!(edge.to in ids)) throw new Error('unknown node key in edge: ' + edge.to)
+        // hasOwn, not `in`: `in` walks the prototype chain.
+        if (!Object.hasOwn(ids, edge.from)) throw new Error('unknown node key in edge: ' + edge.from)
+        if (!Object.hasOwn(ids, edge.to)) throw new Error('unknown node key in edge: ' + edge.to)
         arrowIds.push(bindArrow(editor, ids[edge.from], ids[edge.to], edge.text, color))
+      }
+
+      // The frame was sized from the layout, which assumes every node is NODE_H tall; a grown one
+      // would hang outside and be clipped. Measured from the frame's origin, since moving a frame
+      // moves its children.
+      if (frameId) {
+        const fb = editor.getShapePageBounds(frameId)!
+        const drawn = [...Object.values(ids), ...arrowIds]
+          .map((id) => editor.getShapePageBounds(id as TLShapeId))
+          .filter((b) => b != null)
+        const pad = 40
+        const w = Math.max(fb.w, ...drawn.map((b) => b!.x + b!.w - fb.x + pad))
+        const h = Math.max(fb.h, ...drawn.map((b) => b!.y + b!.h - fb.y + pad))
+        if (w !== fb.w || h !== fb.h) editor.updateShape({ id: frameId, type: 'frame', props: { w, h } })
       }
     })
 
-    return { ids, arrowIds }
+    // Report defects here so the caller does not need a read_frame round trip to find them.
+    const issues = findIssues(Object.values(ids).map((id) => checkShape(editor, editor.getShape(id)!)))
+    return { ids, arrowIds, ...(issues.length ? { issues } : {}) }
   }
   if (tool === 'create_connected') {
     const { fromId, text, shape = 'rectangle', direction = 'right' } = params
@@ -445,6 +557,65 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       arrowId = bindArrow(editor, fromId, nodeId, undefined, color)
     })
     return { nodeId, arrowId }
+  }
+  // hasOwn, not `in`: `in` walks the prototype chain, so 'toString' and friends would match and
+  // be called as ops.
+  if (Object.hasOwn(BATCH_OPS, tool)) {
+    let ids = existingIds(editor, params.ids)
+    // tldraw moves a frame's children with the frame, so listing both would move them twice.
+    const listed = ids
+    ids = ids.filter((id) => !listed.some((other) => other !== id && editor.hasAncestor(id, other)))
+    if (Object.hasOwn(CLUSTERING_MIN, tool)) {
+      const min = CLUSTERING_MIN[tool]
+      ids = ids.filter((id) => {
+        const s = editor.getShape(id)!
+        if (s.type !== 'arrow') return true
+        // Only a bound arrow clusters; a loose one lays out like any other shape.
+        const bound = getArrowBindings(editor, s as Extract<TLShape, { type: 'arrow' }>)
+        return !bound.start && !bound.end
+      })
+      // Throw rather than let tldraw return early in silence.
+      if (ids.length < min) {
+        throw new Error(tool + ' needs at least ' + min + ' shapes it can lay out — bound arrows follow their endpoints and are skipped — got ' + ids.length)
+      }
+    }
+    editor.run(() => BATCH_OPS[tool](editor, ids, params))
+    return { count: ids.length }
+  }
+  if (tool === 'place_shape') {
+    const { id, relativeTo, side, gap = 40, align = 'center' } = params
+    const shape = editor.getShape(id)
+    if (!shape) throw new Error('shape not found: ' + id)
+    const anchor = editor.getShapePageBounds(relativeTo)
+    if (!anchor) throw new Error('shape not found: ' + relativeTo)
+    // A bound arrow's position comes from its bindings, not its x/y; a loose one places fine.
+    if (shape.type === 'arrow') {
+      const bound = getArrowBindings(editor, shape as Extract<TLShape, { type: 'arrow' }>)
+      if (bound.start || bound.end) {
+        throw new Error('bound arrow follows the shapes it connects — place those instead: ' + id)
+      }
+    }
+    const b = editor.getShapePageBounds(shape)!
+    // Backstop: an unrecognised side would otherwise fall through to the left branch.
+    const vertical = side === 'above' || side === 'below'
+    if (!vertical && side !== 'left' && side !== 'right') throw new Error('unknown side: ' + side)
+    // `gap` separates the two bounding boxes; `align` lines them up on the other axis.
+    const lineUp = (start: number, extent: number, own: number) =>
+      align === 'start' ? start : align === 'end' ? start + extent - own : start + (extent - own) / 2
+    const x = vertical
+      ? lineUp(anchor.x, anchor.w, b.w)
+      : side === 'right'
+        ? anchor.x + anchor.w + gap
+        : anchor.x - gap - b.w
+    const y = vertical
+      ? side === 'below'
+        ? anchor.y + anchor.h + gap
+        : anchor.y - gap - b.h
+      : lineUp(anchor.y, anchor.h, b.h)
+    // Move by delta: a shape's own origin is not its page-bounds top-left for arrows, rotated
+    // shapes or draw strokes. nudgeShapes also handles the parent-local conversion.
+    editor.nudgeShapes([id], { x: x - b.x, y: y - b.y })
+    return { id, x, y }
   }
   if (tool === 'list_agents') {
     return Array.from(agentColors, ([agent, color]) => ({ agent, color }))

@@ -121,7 +121,7 @@ export function createCanvasClient(relayUrl: string, opts: { timeoutMs?: number;
   return { call, close }
 }
 
-const TOOL_DEFS = [
+export const TOOL_DEFS = [
   {
     name: 'read_canvas',
     description:
@@ -216,13 +216,14 @@ const TOOL_DEFS = [
   },
   {
     name: 'list_frames',
-    description: 'List every frame on the page with id, name, position, size, and how many shapes it contains.',
+    description:
+      "List every frame on the page with id, name, position, size, how many shapes it contains, and their shapeIds — the ids to hand to the batch tools (nudge_shapes, align_shapes, and the rest).",
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'read_frame',
     description:
-      "Read one frame's contents: a cropped PNG of its children, their structured shape data, and arrow bindings. Also reports `strays` — shapes that overlap the frame but are not in it, so they are missing from the image and the shape list. Only present when there are some.",
+      "Read one frame's contents: a cropped PNG of its children, their structured shape data, and arrow bindings. Also reports `issues` — text that outgrew its box, boxes that overlap, arrows bound at only one end, and children pushed outside the frame, where they are clipped away and invisible — so the image is left for what only an eye can judge. And `strays`: shapes that overlap the frame but are not in it, so they are missing from the image and the shape list. Each field is present only when there is something to report.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -234,7 +235,7 @@ const TOOL_DEFS = [
   {
     name: 'create_arrow',
     description:
-      'Create an arrow bound to two shapes — moving either shape drags the arrow with it.',
+      'Create an arrow bound to two shapes — moving either shape drags the arrow with it. The two must be different shapes: tldraw draws an arrow from a shape to itself as nothing at all.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -260,7 +261,8 @@ const TOOL_DEFS = [
   },
   {
     name: 'update_shape',
-    description: 'Edit an existing shape — move, resize, relabel, or recolour it.',
+    description:
+      'Edit an existing shape — move, resize, relabel, or recolour it. Resizing a box that carries a label re-measures the label against the new size, so a narrower box grows taller rather than hiding words.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -283,13 +285,145 @@ const TOOL_DEFS = [
   },
   {
     name: 'delete_shape',
-    description: 'Delete one or more shapes by id.',
+    description:
+      'Delete one or more shapes by id. Deleting a frame deletes everything inside it, and the count reports every shape that left the page, not how many ids were passed.',
     inputSchema: {
       type: 'object',
       properties: {
         ids: { type: 'array', items: { type: 'string' } },
       },
       required: ['ids'],
+    },
+  },
+  {
+    name: 'nudge_shapes',
+    description:
+      "Move several shapes by the same offset in one undo step — e.g. shift a whole diagram down to make room above it. Nudging a frame's children does not take them out of the frame: pushed past its edge they are clipped away and become invisible, which read_frame then reports as a `clipped` issue.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Shape ids to act on. list_frames reports a frame's shapeIds when you want everything in it.",
+        },
+        dx: { type: 'number', description: 'Horizontal offset in page pixels; negative moves left.' },
+        dy: { type: 'number', description: 'Vertical offset in page pixels; negative moves up.' },
+      },
+      required: ['ids', 'dx', 'dy'],
+    },
+  },
+  {
+    name: 'align_shapes',
+    description:
+      "Line several shapes up on a shared edge or centre line, in one undo step. Boxes that are almost-but-not-quite aligned are what let an arrow run through an unrelated shape. Bound arrows in the id list are skipped — they follow their endpoints — so a frame's shapeIds can be passed as they come; needs two shapes left after that.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Shape ids to act on. list_frames reports a frame's shapeIds when you want everything in it.",
+        },
+        edge: {
+          type: 'string',
+          enum: ['left', 'right', 'top', 'bottom', 'center-horizontal', 'center-vertical'],
+          description: 'The edge or centre line to line them up on.',
+        },
+      },
+      required: ['ids', 'edge'],
+    },
+  },
+  {
+    name: 'distribute_shapes',
+    description:
+      "Space several shapes evenly between the outermost two, in one undo step — even gaps without computing them. Bound arrows in the id list are skipped; needs three shapes left after that.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Shape ids to act on. list_frames reports a frame's shapeIds when you want everything in it.",
+        },
+        axis: { type: 'string', enum: ['horizontal', 'vertical'], description: 'The axis to spread them along.' },
+      },
+      required: ['ids', 'axis'],
+    },
+  },
+  {
+    name: 'stack_shapes',
+    description:
+      'Stack several shapes into a row or column with an equal gap between them, in one undo step. Bound arrows in the id list are skipped; needs two shapes left after that.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Shape ids to act on. list_frames reports a frame's shapeIds when you want everything in it.",
+        },
+        axis: { type: 'string', enum: ['horizontal', 'vertical'], description: 'Row (horizontal) or column (vertical).' },
+        gap: { type: 'number', description: "Pixels between adjacent shapes. Defaults to tldraw's own spacing." },
+      },
+      required: ['ids', 'axis'],
+    },
+  },
+  {
+    name: 'pack_shapes',
+    description:
+      'Pack several shapes into a tight grid centred on where they already are, in one undo step — tidies a scattered set. Bound arrows in the id list are skipped; needs two shapes left after that.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Shape ids to act on. list_frames reports a frame's shapeIds when you want everything in it.",
+        },
+        gap: { type: 'number', description: "Pixels between packed shapes. Defaults to tldraw's own spacing." },
+      },
+      required: ['ids'],
+    },
+  },
+  {
+    name: 'flip_shapes',
+    description: 'Mirror several shapes across the centre of their combined bounds, in one undo step.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Shape ids to act on. list_frames reports a frame's shapeIds when you want everything in it.",
+        },
+        axis: { type: 'string', enum: ['horizontal', 'vertical'], description: 'The axis to mirror across.' },
+      },
+      required: ['ids', 'axis'],
+    },
+  },
+  {
+    name: 'place_shape',
+    description:
+      'Position a shape relative to another one — "to the right of X with a 40px gap" — instead of working out absolute coordinates. The other shape does not move. A bound arrow cannot be placed: it goes where the shapes it connects put it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The shape to move.' },
+        relativeTo: { type: 'string', description: 'The shape to position it against; this one stays put.' },
+        side: {
+          type: 'string',
+          enum: ['right', 'left', 'above', 'below'],
+          description: 'Which side of the other shape to put it on.',
+        },
+        gap: { type: 'number', description: 'Pixels between the two shapes. Default 40.' },
+        align: {
+          type: 'string',
+          enum: ['center', 'start', 'end'],
+          description: "How to line the two up on the other axis. Default 'center'.",
+        },
+      },
+      required: ['id', 'relativeTo', 'side'],
     },
   },
   {
@@ -316,7 +450,8 @@ const TOOL_DEFS = [
   },
   {
     name: 'create_page',
-    description: 'Create a new page on the canvas — a separate board/topic with its own shapes.',
+    description:
+      'Create a new page on the canvas — a separate board/topic with its own shapes. tldraw allows 40 pages; past that this fails rather than reporting a page it did not make. There is no tool to delete one.',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string' } },
@@ -342,7 +477,7 @@ const TOOL_DEFS = [
   {
     name: 'create_graph',
     description:
-      'Build a node-and-edge diagram in one step: lay out nodes (tree or grid), create each as a shape, and connect edges with bound arrows. Optionally wrap it all in a named frame. Works for any graph — flowchart, org chart, dependency graph, etc.',
+      'Build a node-and-edge diagram in one step: lay out nodes (tree or grid), create each as a shape, and connect edges with bound arrows. Optionally wrap it all in a named frame. Works for any graph — flowchart, org chart, dependency graph, etc. Reports `issues` when a label outgrew its node or two nodes overlap. Node keys must be unique, and an edge from a node to itself is refused.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -415,6 +550,50 @@ const TOOL_DEFS = [
   },
 ]
 
+const DEFS_BY_NAME = new Map(TOOL_DEFS.map((t) => [t.name, t]))
+
+function matchesType(type: string | undefined, value: unknown): boolean {
+  switch (type) {
+    case 'array': return Array.isArray(value)
+    case 'object': return typeof value === 'object' && value !== null && !Array.isArray(value)
+    case 'number': return typeof value === 'number' && Number.isFinite(value)
+    case 'string': return typeof value === 'string'
+    case 'boolean': return typeof value === 'boolean'
+    default: return true
+  }
+}
+
+const describe = (value: unknown) => (Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value)
+
+// The MCP SDK does not check inputSchema, so an unchecked call reaches the canvas and matches
+// nothing — a no-op reported as a success.
+function schemaError(name: string, args: unknown): string | null {
+  const def = DEFS_BY_NAME.get(name)
+  if (!def) return null
+  const given = (args ?? {}) as Record<string, unknown>
+  const schema = def.inputSchema as unknown as {
+    required?: string[]
+    properties?: Record<string, { type?: string; enum?: string[]; minItems?: number }>
+  }
+  const missing = (schema.required ?? []).filter((k) => given[k] === undefined)
+  if (missing.length > 0) {
+    return name + ': missing required argument' + (missing.length > 1 ? 's' : '') + ' ' + missing.join(', ')
+  }
+  for (const [key, spec] of Object.entries(schema.properties ?? {})) {
+    const value = given[key]
+    if (spec.enum && value !== undefined && !spec.enum.includes(value as string)) {
+      return name + ': ' + key + ' must be one of ' + spec.enum.join(', ') + ' — got ' + JSON.stringify(value)
+    }
+    if (value !== undefined && !matchesType(spec.type, value)) {
+      return name + ': ' + key + ' must be ' + spec.type + ' — got ' + describe(value)
+    }
+    if (spec.minItems != null && Array.isArray(value) && value.length < spec.minItems) {
+      return name + ': ' + key + ' needs at least ' + spec.minItems + ' items — got ' + value.length
+    }
+  }
+  return null
+}
+
 type ToolContent =
   | { type: 'text'; text: string }
   | { type: 'image'; data: string; mimeType: string }
@@ -454,6 +633,7 @@ export function createDispatcher(call: CanvasCall) {
       const r = await call('read_frame', args)
       // strays only appear when there are some: a frame that is intact reads exactly as before.
       const payload: Record<string, unknown> = { shapes: r.shapes, bindings: r.bindings, frameId: r.frameId }
+      if (r.issues?.length) payload.issues = r.issues
       if (r.strays?.length) payload.strays = r.strays
       const text: ToolContent = { type: 'text', text: JSON.stringify(payload, null, 2) }
       if (r.url == null) return { content: [text] }
@@ -493,11 +673,34 @@ export function createDispatcher(call: CanvasCall) {
     async create_connected(args) {
       return asText(JSON.stringify(await call('create_connected', args)))
     },
+    async nudge_shapes(args) {
+      return asText(JSON.stringify(await call('nudge_shapes', args)))
+    },
+    async align_shapes(args) {
+      return asText(JSON.stringify(await call('align_shapes', args)))
+    },
+    async distribute_shapes(args) {
+      return asText(JSON.stringify(await call('distribute_shapes', args)))
+    },
+    async stack_shapes(args) {
+      return asText(JSON.stringify(await call('stack_shapes', args)))
+    },
+    async pack_shapes(args) {
+      return asText(JSON.stringify(await call('pack_shapes', args)))
+    },
+    async flip_shapes(args) {
+      return asText(JSON.stringify(await call('flip_shapes', args)))
+    },
+    async place_shape(args) {
+      return asText(JSON.stringify(await call('place_shape', args)))
+    },
     async list_agents() {
       return asText(JSON.stringify(await call('list_agents', {}), null, 2))
     },
     async export_image(args) {
       const { target, format, path, name } = args
+      // The one conditional requirement a JSON schema cannot state.
+      if (target === 'frame' && !name) throw new Error('export_image: name is required when target is frame')
       const resolved = resolve(path)
       if (!resolved.startsWith(process.cwd() + '/')) {
         throw new Error(`path must be inside the server working directory: ${path}`)
@@ -512,10 +715,12 @@ export function createDispatcher(call: CanvasCall) {
   }
 
   return async (name: string, args: unknown): Promise<ToolResult> => {
-    const handler = handlers[name]
-    if (!handler) return { ...asText(`unknown tool: ${name}`), isError: true }
+    // hasOwn, not a bare lookup: Object.prototype members are callable and would run as handlers.
+    if (!Object.hasOwn(handlers, name)) return { ...asText(`unknown tool: ${name}`), isError: true }
+    const problem = schemaError(name, args)
+    if (problem) return { ...asText(problem), isError: true }
     try {
-      return await handler(args ?? {})
+      return await handlers[name](args ?? {})
     } catch (e: any) {
       return { ...asText(String(e?.message ?? e)), isError: true }
     }

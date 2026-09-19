@@ -31,17 +31,21 @@ lay out a graph in one call, and export the result to a file you can drop into a
 
 ## What it can do
 
-21 MCP tools over one canvas:
+28 MCP tools over one canvas:
 
 - **Read** — `read_canvas` (a raster the agent can read freehand off), `get_snapshot` (every
-  shape with position + text), `read_frame` (a frame cropped to a raster **plus** its shapes and
-  their arrow bindings).
+  shape with position + text), `read_frame` (a frame cropped to a raster **plus** its shapes,
+  their arrow bindings, and `issues` — text that outgrew its box, boxes that overlap, arrows
+  bound at only one end).
 - **Draw** — `create_shape` (rectangle / ellipse / text + triangle, diamond, star, hexagon,
   cloud, x-box, check-box), `create_line`, `create_highlight`, `create_arrow` (bound to both
   shapes), `create_note`.
 - **Frames** — `create_frame`, `list_frames` — a named frame is the shared reference unit
   ("what's in frame X?").
 - **Edit** — `update_shape` (move / resize / relabel / recolour), `delete_shape`.
+- **Arrange** — `place_shape` (put a shape beside another one, no coordinates), `nudge_shapes`,
+  `align_shapes`, `distribute_shapes`, `stack_shapes`, `pack_shapes`, `flip_shapes` — each over a
+  list of ids, each one undo step.
 - **Navigate** — `zoom_to_frame`, `select` — point the human's view and highlight shapes.
 - **Compose** — `create_graph` — any node-and-edge diagram (flowchart, org chart, dependency
   graph…), laid out tree or grid, with bound arrows, in one call — plus `create_connected`.

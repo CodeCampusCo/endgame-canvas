@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdir, rm, unlink } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { startRelay } from './relay'
-import { createCanvasClient, createDispatcher } from './server'
+import { createCanvasClient, createDispatcher, TOOL_DEFS } from './server'
 
 const TEST_DIR = resolve('test-output')
 await mkdir(TEST_DIR, { recursive: true })
@@ -736,4 +736,305 @@ test('dispatch list_agents → pretty JSON text', async () => {
   expect(await dispatch('list_agents', {})).toEqual({
     content: [{ type: 'text', text: JSON.stringify(agents, null, 2) }],
   })
+})
+
+// --- Structural checks: issues ride along with read_frame and create_graph ---
+
+test('dispatch read_frame surfaces issues alongside the shapes', async () => {
+  const issues = [
+    { kind: 'text-overflow', id: 'shape:a', grewBy: 34 },
+    { kind: 'overlap', id: 'shape:a', with: 'shape:b' },
+  ]
+  const dispatch = createDispatcher(async () => ({
+    url: null,
+    width: 0,
+    height: 0,
+    shapes: [],
+    bindings: [],
+    frameId: 'shape:f1',
+    issues,
+  }))
+  const text = (await dispatch('read_frame', { name: 'f' })).content[0] as { text: string }
+  expect(JSON.parse(text.text)).toEqual({ shapes: [], bindings: [], frameId: 'shape:f1', issues })
+})
+
+test('dispatch read_frame omits issues entirely when the frame is clean', async () => {
+  const dispatch = createDispatcher(async () => ({
+    url: null,
+    width: 0,
+    height: 0,
+    shapes: [],
+    bindings: [],
+    frameId: 'shape:f1',
+    issues: [],
+    strays: [],
+  }))
+  const text = (await dispatch('read_frame', { name: 'f' })).content[0] as { text: string }
+  expect(JSON.parse(text.text)).toEqual({ shapes: [], bindings: [], frameId: 'shape:f1' })
+})
+
+test('dispatch read_frame reports issues and strays together when both are present', async () => {
+  const issues = [{ kind: 'unbound-arrow', id: 'shape:arr', missing: ['end'] }]
+  const strays = [{ id: 'shape:b', type: 'geo', x: 9, y: 9, w: 3, h: 4, text: 'out' }]
+  const dispatch = createDispatcher(async () => ({
+    url: null,
+    width: 0,
+    height: 0,
+    shapes: [],
+    bindings: [],
+    frameId: 'shape:f1',
+    issues,
+    strays,
+  }))
+  const text = (await dispatch('read_frame', { name: 'f' })).content[0] as { text: string }
+  expect(JSON.parse(text.text)).toEqual({
+    shapes: [],
+    bindings: [],
+    frameId: 'shape:f1',
+    issues,
+    strays,
+  })
+})
+
+test('dispatch create_graph passes issues through untouched', async () => {
+  const result = {
+    ids: { A: 'shape:a' },
+    arrowIds: [],
+    issues: [{ kind: 'text-overflow', id: 'shape:a', grewBy: 12 }],
+  }
+  const dispatch = createDispatcher(async () => result)
+  expect(await dispatch('create_graph', { nodes: [], edges: [] })).toEqual({
+    content: [{ type: 'text', text: JSON.stringify(result) }],
+  })
+})
+
+// --- Batch layout ops + relative placement ---
+
+const BATCH_CALLS: [string, Record<string, unknown>][] = [
+  ['nudge_shapes', { ids: ['shape:a', 'shape:b'], dx: 0, dy: 50 }],
+  ['align_shapes', { ids: ['shape:a', 'shape:b'], edge: 'left' }],
+  ['distribute_shapes', { ids: ['shape:a', 'shape:b'], axis: 'horizontal' }],
+  ['stack_shapes', { ids: ['shape:a', 'shape:b'], axis: 'vertical', gap: 80 }],
+  ['pack_shapes', { ids: ['shape:a', 'shape:b'], gap: 32 }],
+  ['flip_shapes', { ids: ['shape:a', 'shape:b'], axis: 'horizontal' }],
+]
+
+for (const [tool, args] of BATCH_CALLS) {
+  test(`dispatch ${tool} → forwards args verbatim, returns the count as text`, async () => {
+    let seen: any
+    const result = { count: 2 }
+    const dispatch = createDispatcher(async (t, params) => {
+      seen = { tool: t, params }
+      return result
+    })
+    expect(await dispatch(tool, args)).toEqual({
+      content: [{ type: 'text', text: JSON.stringify(result) }],
+    })
+    expect(seen).toEqual({ tool, params: args })
+  })
+}
+
+test('dispatch stack_shapes without a gap → forwards without it, browser applies the default', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { count: 3 }
+  })
+  const args = { ids: ['shape:a', 'shape:b', 'shape:c'], axis: 'vertical' }
+  await dispatch('stack_shapes', args)
+  expect(seen).toEqual({ tool: 'stack_shapes', params: args })
+})
+
+test('dispatch place_shape → forwards id/relativeTo/side/gap/align, returns the page point', async () => {
+  let seen: any
+  const result = { id: 'shape:a', x: 380, y: 100 }
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return result
+  })
+  const args = { id: 'shape:a', relativeTo: 'shape:b', side: 'right', gap: 40, align: 'center' }
+  expect(await dispatch('place_shape', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify(result) }],
+  })
+  expect(seen).toEqual({ tool: 'place_shape', params: args })
+})
+
+test('dispatch place_shape with only the required args → gap/align left to the browser default', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:a', x: 0, y: 0 }
+  })
+  const args = { id: 'shape:a', relativeTo: 'shape:b', side: 'below' }
+  await dispatch('place_shape', args)
+  expect(seen).toEqual({ tool: 'place_shape', params: args })
+})
+
+test('every new tool is declared in TOOL_DEFS with a schema that fully describes a valid call', async () => {
+  const required = Object.fromEntries(
+    TOOL_DEFS.map((t: any) => [t.name, (t.inputSchema.required ?? []).sort()]),
+  )
+  expect(required.nudge_shapes).toEqual(['dx', 'dy', 'ids'])
+  expect(required.align_shapes).toEqual(['edge', 'ids'])
+  expect(required.distribute_shapes).toEqual(['axis', 'ids'])
+  expect(required.stack_shapes).toEqual(['axis', 'ids'])
+  expect(required.pack_shapes).toEqual(['ids'])
+  expect(required.flip_shapes).toEqual(['axis', 'ids'])
+  expect(required.place_shape).toEqual(['id', 'relativeTo', 'side'])
+})
+
+test('every tool declared to the client has a handler — the three-place recipe, enforced', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  const unhandled: string[] = []
+  for (const { name } of TOOL_DEFS as { name: string }[]) {
+    const r = await dispatch(name, {})
+    if (r.isError && String((r.content[0] as any).text).startsWith('unknown tool')) unhandled.push(name)
+  }
+  expect(unhandled).toEqual([])
+})
+
+// --- the published schema is enforced, because the MCP SDK does not enforce it ---
+
+test('a missing required argument is refused before the canvas is touched', async () => {
+  let called = false
+  const dispatch = createDispatcher(async () => { called = true; return {} })
+  const r = await dispatch('place_shape', { id: 'shape:a', relativeTo: 'shape:b' })
+  expect(r.isError).toBe(true)
+  expect((r.content[0] as any).text).toBe('place_shape: missing required argument side')
+  expect(called).toBe(false)
+})
+
+test('several missing required arguments are named together', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  const r = await dispatch('nudge_shapes', { ids: ['shape:a'] })
+  expect((r.content[0] as any).text).toBe('nudge_shapes: missing required arguments dx, dy')
+})
+
+test('a misspelled enum is refused, naming the values that would have worked', async () => {
+  let called = false
+  const dispatch = createDispatcher(async () => { called = true; return {} })
+  const r = await dispatch('export_image', { target: 'frme', format: 'png', path: 'x.png' })
+  expect(r.isError).toBe(true)
+  expect((r.content[0] as any).text).toContain('target must be one of canvas, frame, selection')
+  expect(called).toBe(false)
+})
+
+test('an omitted optional enum is not an error — the browser applies its default', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => { seen = { tool, params }; return { id: 'shape:a' } })
+  const args = { nodes: [{ key: 'a', text: 'A' }], edges: [] } // no `layout`
+  await dispatch('create_graph', args)
+  expect(seen).toEqual({ tool: 'create_graph', params: args })
+})
+
+// A value that satisfies whatever the schema declares for a field, so a sweep trips the one
+// constraint it is testing rather than a neighbour.
+function sampleFor(spec: any): unknown {
+  if (spec?.enum) return spec.enum[0]
+  if (spec?.type === 'number') return 0
+  if (spec?.type === 'array') return [{ x: 0, y: 0 }, { x: 1, y: 1 }]
+  if (spec?.type === 'object') return {}
+  if (spec?.type === 'boolean') return true
+  return 'x'
+}
+
+test('every enum the tools publish is checked, not just the ones someone remembered', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  const withEnums = (TOOL_DEFS as any[]).flatMap((t) =>
+    Object.entries(t.inputSchema.properties ?? {})
+      .filter(([, spec]: [string, any]) => spec.enum)
+      .map(([key]) => [t.name, key, t.inputSchema.required ?? []] as const),
+  )
+  expect(withEnums.length).toBeGreaterThan(5)
+  for (const [name, key, required] of withEnums) {
+    const props = (TOOL_DEFS as any[]).find((t) => t.name === name).inputSchema.properties ?? {}
+    const args: Record<string, unknown> = Object.fromEntries(
+      required.map((k: string) => [k, sampleFor(props[k])]),
+    )
+    args[key] = 'definitely-not-a-valid-value'
+    const r = await dispatch(name, args)
+    expect({ name, key, isError: r.isError }).toEqual({ name, key, isError: true })
+    expect((r.content[0] as any).text).toContain(`${key} must be one of`)
+  }
+})
+
+test('a name inherited from Object.prototype is an unknown tool, not a callable handler', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  for (const name of ['constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+    const r = await dispatch(name, {})
+    expect({ name, text: (r.content[0] as any).text }).toEqual({ name, text: `unknown tool: ${name}` })
+  }
+})
+
+test('an array shorter than the schema says is refused', async () => {
+  let called = false
+  const dispatch = createDispatcher(async () => { called = true; return {} })
+  const r = await dispatch('create_line', { points: [{ x: 0, y: 0 }] })
+  expect(r.isError).toBe(true)
+  expect((r.content[0] as any).text).toBe('create_line: points needs at least 2 items — got 1')
+  expect(called).toBe(false)
+})
+
+test('export_image names the one requirement a schema cannot state, instead of a TypeError', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  const r = await dispatch('export_image', { target: 'frame', format: 'png', path: 'test-output/x.png' })
+  expect(r.isError).toBe(true)
+  expect((r.content[0] as any).text).toBe('export_image: name is required when target is frame')
+})
+
+test('every minItems the tools publish is enforced, not just the one someone remembered', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  const withMin = (TOOL_DEFS as any[]).flatMap((t) =>
+    Object.entries(t.inputSchema.properties ?? {})
+      .filter(([, spec]: [string, any]) => spec.minItems)
+      .map(([key, spec]: [string, any]) => [t.name, key, spec.minItems, t.inputSchema.required ?? []] as const),
+  )
+  expect(withMin.length).toBeGreaterThan(0)
+  for (const [name, key, min, required] of withMin) {
+    const props = (TOOL_DEFS as any[]).find((t) => t.name === name).inputSchema.properties ?? {}
+    const args: Record<string, unknown> = Object.fromEntries(
+      required.map((k: string) => [k, sampleFor(props[k])]),
+    )
+    args[key] = []
+    const r = await dispatch(name, args)
+    expect({ name, key, isError: r.isError }).toEqual({ name, key, isError: true })
+    expect((r.content[0] as any).text).toContain(`needs at least ${min} items`)
+  }
+})
+
+test('a value of the wrong type is named, instead of erroring somewhere inside tldraw', async () => {
+  let called = false
+  const dispatch = createDispatcher(async () => { called = true; return {} })
+  const cases: [string, Record<string, unknown>, string][] = [
+    ['create_line', { points: 'hello' }, 'create_line: points must be array — got string'],
+    ['select', { ids: 'shape:a' }, 'select: ids must be array — got string'],
+    ['create_shape', { type: 'rectangle', x: '100', y: 0 }, 'create_shape: x must be number — got string'],
+    ['create_frame', { name: 'f', x: 0, y: 0, w: null, h: 10 }, 'create_frame: w must be number — got null'],
+    ['nudge_shapes', { ids: ['shape:a'], dx: 0, dy: [] }, 'nudge_shapes: dy must be number — got array'],
+  ]
+  for (const [tool, args, message] of cases) {
+    const r = await dispatch(tool, args)
+    expect({ tool, text: (r.content[0] as any).text }).toEqual({ tool, text: message })
+  }
+  expect(called).toBe(false)
+})
+
+test('every declared type the tools publish is enforced', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  const typed = (TOOL_DEFS as any[]).flatMap((t) =>
+    Object.entries(t.inputSchema.properties ?? {})
+      .filter(([, spec]: [string, any]) => ['array', 'number', 'boolean'].includes(spec.type))
+      .map(([key, spec]: [string, any]) => [t.name, key, spec.type, t.inputSchema.required ?? []] as const),
+  )
+  expect(typed.length).toBeGreaterThan(10)
+  for (const [name, key, type, required] of typed) {
+    const props = (TOOL_DEFS as any[]).find((t) => t.name === name).inputSchema.properties ?? {}
+    const args: Record<string, unknown> = Object.fromEntries(
+      required.map((k: string) => [k, sampleFor(props[k])]),
+    )
+    args[key] = 'not-a-' + type
+    const r = await dispatch(name, args)
+    expect({ name, key, isError: r.isError }).toEqual({ name, key, isError: true })
+    expect((r.content[0] as any).text).toContain(`${key} must be ${type}`)
+  }
 })
