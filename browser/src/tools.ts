@@ -179,26 +179,6 @@ const CLUSTERING_MIN: Record<string, number> = {
   pack_shapes: 2,
 }
 
-// The MCP SDK hands tool arguments through without checking inputSchema, so an enum typo would
-// otherwise reach tldraw, match nothing, do nothing, and come back as a success.
-const ENUM_PARAMS: Record<string, Record<string, readonly string[]>> = {
-  align_shapes: { edge: ['left', 'right', 'top', 'bottom', 'center-horizontal', 'center-vertical'] },
-  distribute_shapes: { axis: ['horizontal', 'vertical'] },
-  stack_shapes: { axis: ['horizontal', 'vertical'] },
-  flip_shapes: { axis: ['horizontal', 'vertical'] },
-  place_shape: { side: ['right', 'left', 'above', 'below'], align: ['center', 'start', 'end'] },
-}
-
-function checkEnums(tool: string, params: any) {
-  if (!Object.hasOwn(ENUM_PARAMS, tool)) return
-  for (const [key, allowed] of Object.entries(ENUM_PARAMS[tool])) {
-    const value = params?.[key]
-    if (value !== undefined && !allowed.includes(value)) {
-      throw new Error(tool + ': ' + key + ' must be one of ' + allowed.join(', ') + ' — got ' + JSON.stringify(value))
-    }
-  }
-}
-
 // nudgeShapes reads each shape without a null check, so one stale id would throw mid-batch.
 // Filter first, and refuse a call that would move nothing rather than report a silent success.
 function existingIds(editor: Editor, ids: string[]): TLShapeId[] {
@@ -212,7 +192,6 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   // ...(color ? {...} : {}) spread below is a no-op and tldraw's own default applies —
   // behaviour is unchanged from before this feature existed.
   const color = agent ? colorForAgent(agent) : undefined
-  checkEnums(tool, params)
   // read_canvas/get_snapshot/list_frames/read_frame all call editor.getCurrentPageShapes(),
   // so they're inherently scoped to the current page — switch_page re-scopes them for free.
   if (tool === 'read_canvas') {
@@ -372,18 +351,15 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     const { id, x, y, w, h, text, color, fill, parent } = params
     const shape = editor.getShape(id)
     if (!shape) throw new Error('shape not found: ' + id)
+    // Deliberately no growY reset anywhere below, though an explicit resize looks like the moment
+    // for one. tldraw grows a box to fit a label and recomputes that only when the text changes,
+    // so clearing growY hands back an exact height while cropping the label out of sight — and
+    // disarms the text-overflow check for that shape for good, since nothing will ever set it
+    // again. A grown box therefore measures h + growY, and only a shorter label brings it down.
+    const size: Record<string, unknown> = {}
+    if (w !== undefined) size.w = w
+    if (h !== undefined) size.h = h
     const props: Record<string, unknown> = {}
-    if (w !== undefined) props.w = w
-    if (h !== undefined) props.h = h
-    // A height at least as tall as the box already is takes the size back from tldraw, so the
-    // caller gets exactly the h they asked for and the text-overflow clears. Anything smaller —
-    // or a width-only change, which re-wraps the label taller — leaves the growth alone: tldraw
-    // recomputes growY only when the text itself changes, so clearing it there would crop the
-    // label permanently, with nothing left to report that it happened.
-    const grown = shape.props as { growY?: number; h?: number }
-    if (h !== undefined && grown.growY != null && grown.h != null && h >= grown.h + grown.growY) {
-      props.growY = 0
-    }
     if (color !== undefined) props.color = color
     if (fill !== undefined) props.fill = fill
     if (text !== undefined) {
@@ -396,23 +372,30 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       const pagePoint = { x: x ?? pb!.x, y: y ?? pb!.y }
       local = editor.getPointInParentSpace(shape, pagePoint)
     }
-    editor.updateShape({
-      id,
-      type: shape.type,
-      ...(local ? { x: local.x, y: local.y } : {}),
-      props,
-    })
-    // Reparent last: reparentShapes rewrites x/y to keep the page position, so it has to see
-    // the position this call just set, not the one it started with.
-    if (parent !== undefined) {
-      if (parent === 'page') {
-        editor.reparentShapes([id], editor.getCurrentPageId())
-      } else {
-        const target = findFrame(editor, parent)
-        if (!target) throw new Error('frame not found: ' + parent)
-        editor.reparentShapes([id], target.id)
+    editor.run(() => {
+      // Size first, in its own update: tldraw measures a new label against the height the shape
+      // had when the update arrived, so resizing and relabelling together leaves a leftover
+      // growY from the old height — a text-overflow the caller cannot clear, because the label
+      // already fits the size they asked for.
+      if (Object.keys(size).length > 0) editor.updateShape({ id, type: shape.type, props: size })
+      editor.updateShape({
+        id,
+        type: shape.type,
+        ...(local ? { x: local.x, y: local.y } : {}),
+        props,
+      })
+      // Reparent last: reparentShapes rewrites x/y to keep the page position, so it has to see
+      // the position this call just set, not the one it started with.
+      if (parent !== undefined) {
+        if (parent === 'page') {
+          editor.reparentShapes([id], editor.getCurrentPageId())
+        } else {
+          const target = findFrame(editor, parent)
+          if (!target) throw new Error('frame not found: ' + parent)
+          editor.reparentShapes([id], target.id)
+        }
       }
-    }
+    })
     return { id }
   }
   if (tool === 'delete_shape') {
@@ -441,6 +424,12 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     const { name } = params
     const id = PageRecordType.createId()
     editor.createPage({ id, name })
+    // createPage is a silent no-op once the board is at tldraw's page cap, which would otherwise
+    // hand back an id for a page that does not exist — and switch_page would then fail with
+    // "page not found" for something this tool just reported creating.
+    if (!editor.getPage(id)) {
+      throw new Error('page not created: the board is at tldraw\'s limit of ' + editor.options.maxPages + ' pages — delete one in the browser first')
+    }
     return { id }
   }
   if (tool === 'list_pages') {
@@ -568,11 +557,18 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     let ids = existingIds(editor, params.ids)
     if (Object.hasOwn(CLUSTERING_MIN, tool)) {
       const min = CLUSTERING_MIN[tool]
-      ids = ids.filter((id) => editor.getShape(id)!.type !== 'arrow')
+      ids = ids.filter((id) => {
+        const s = editor.getShape(id)!
+        if (s.type !== 'arrow') return true
+        // Only a BOUND arrow does the clustering. One left loose — its endpoints deleted, or a
+        // human's stray stroke — is an ordinary shape to tldraw and lays out fine.
+        const bound = getArrowBindings(editor, s as Extract<TLShape, { type: 'arrow' }>)
+        return !bound.start && !bound.end
+      })
       // Throw rather than let tldraw return early in silence: a no-op that reports a count is
       // indistinguishable from work done, and the caller has no other way to find out.
       if (ids.length < min) {
-        throw new Error(tool + ' needs at least ' + min + ' shapes that are not arrows — got ' + ids.length)
+        throw new Error(tool + ' needs at least ' + min + ' shapes it can lay out — bound arrows follow their endpoints and are skipped — got ' + ids.length)
       }
     }
     editor.run(() => BATCH_OPS[tool](editor, ids, params))
@@ -594,7 +590,11 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       }
     }
     const b = editor.getShapePageBounds(shape)!
+    // The dispatcher validates this against the published enum; this is the backstop, because
+    // an unrecognised side would otherwise fall through to the left branch and move the shape
+    // somewhere nobody asked for.
     const vertical = side === 'above' || side === 'below'
+    if (!vertical && side !== 'left' && side !== 'right') throw new Error('unknown side: ' + side)
     // The gap is between the two bounding boxes, so the shape's near edge lands `gap` from the
     // anchor's; on the other axis the two are lined up according to `align`.
     const lineUp = (start: number, extent: number, own: number) =>

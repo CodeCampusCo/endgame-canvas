@@ -262,7 +262,7 @@ export const TOOL_DEFS = [
   {
     name: 'update_shape',
     description:
-      "Edit an existing shape — move, resize, relabel, or recolour it. On a box tldraw grew to fit an oversized label, an h at least as tall as the height the shape currently reports takes the size back and gives exactly that h; a smaller one leaves the growth alone rather than cropping the label out of sight.",
+      'Edit an existing shape — move, resize, relabel, or recolour it. A box tldraw grew to fit an oversized label keeps that growth through any resize — it measures h plus the growth — because only a change of text makes tldraw recompute it.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -315,7 +315,7 @@ export const TOOL_DEFS = [
   {
     name: 'align_shapes',
     description:
-      "Line several shapes up on a shared edge or centre line, in one undo step. Boxes that are almost-but-not-quite aligned are what let an arrow run through an unrelated shape. Arrows in the id list are skipped — they follow their endpoints — so a frame's shapeIds can be passed as they come; needs two shapes left after that.",
+      "Line several shapes up on a shared edge or centre line, in one undo step. Boxes that are almost-but-not-quite aligned are what let an arrow run through an unrelated shape. Bound arrows in the id list are skipped — they follow their endpoints — so a frame's shapeIds can be passed as they come; needs two shapes left after that.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -336,7 +336,7 @@ export const TOOL_DEFS = [
   {
     name: 'distribute_shapes',
     description:
-      "Space several shapes evenly between the outermost two, in one undo step — even gaps without computing them. Arrows in the id list are skipped; needs three shapes left after that.",
+      "Space several shapes evenly between the outermost two, in one undo step — even gaps without computing them. Bound arrows in the id list are skipped; needs three shapes left after that.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -353,7 +353,7 @@ export const TOOL_DEFS = [
   {
     name: 'stack_shapes',
     description:
-      'Stack several shapes into a row or column with an equal gap between them, in one undo step. Arrows in the id list are skipped; needs two shapes left after that.',
+      'Stack several shapes into a row or column with an equal gap between them, in one undo step. Bound arrows in the id list are skipped; needs two shapes left after that.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -371,7 +371,7 @@ export const TOOL_DEFS = [
   {
     name: 'pack_shapes',
     description:
-      'Pack several shapes into a tight grid centred on where they already are, in one undo step — tidies a scattered set. Arrows in the id list are skipped; needs two shapes left after that.',
+      'Pack several shapes into a tight grid centred on where they already are, in one undo step — tidies a scattered set. Bound arrows in the id list are skipped; needs two shapes left after that.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -449,7 +449,8 @@ export const TOOL_DEFS = [
   },
   {
     name: 'create_page',
-    description: 'Create a new page on the canvas — a separate board/topic with its own shapes.',
+    description:
+      'Create a new page on the canvas — a separate board/topic with its own shapes. tldraw allows 40 pages; past that this fails rather than reporting a page it did not make. There is no tool to delete one.',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string' } },
@@ -547,6 +548,33 @@ export const TOOL_DEFS = [
     },
   },
 ]
+
+const DEFS_BY_NAME = new Map(TOOL_DEFS.map((t) => [t.name, t]))
+
+// The MCP SDK hands tool arguments straight through without checking inputSchema, so a missing
+// required argument or a misspelled enum would reach the canvas, match nothing, and come back as
+// a success — indistinguishable from work done. The schema we publish is the only description of
+// a correct call, so it is the thing to enforce, once, for every tool.
+function schemaError(name: string, args: unknown): string | null {
+  const def = DEFS_BY_NAME.get(name)
+  if (!def) return null
+  const given = (args ?? {}) as Record<string, unknown>
+  const schema = def.inputSchema as unknown as {
+    required?: string[]
+    properties?: Record<string, { enum?: string[] }>
+  }
+  const missing = (schema.required ?? []).filter((k) => given[k] === undefined)
+  if (missing.length > 0) {
+    return name + ': missing required argument' + (missing.length > 1 ? 's' : '') + ' ' + missing.join(', ')
+  }
+  for (const [key, spec] of Object.entries(schema.properties ?? {})) {
+    const value = given[key]
+    if (spec.enum && value !== undefined && !spec.enum.includes(value as string)) {
+      return name + ': ' + key + ' must be one of ' + spec.enum.join(', ') + ' — got ' + JSON.stringify(value)
+    }
+  }
+  return null
+}
 
 type ToolContent =
   | { type: 'text'; text: string }
@@ -667,10 +695,13 @@ export function createDispatcher(call: CanvasCall) {
   }
 
   return async (name: string, args: unknown): Promise<ToolResult> => {
-    const handler = handlers[name]
-    if (!handler) return { ...asText(`unknown tool: ${name}`), isError: true }
+    // hasOwn, not a bare lookup: 'constructor', 'toString' and friends come off Object.prototype
+    // as callable and would be run as if they were handlers.
+    if (!Object.hasOwn(handlers, name)) return { ...asText(`unknown tool: ${name}`), isError: true }
+    const problem = schemaError(name, args)
+    if (problem) return { ...asText(problem), isError: true }
     try {
-      return await handler(args ?? {})
+      return await handlers[name](args ?? {})
     } catch (e: any) {
       return { ...asText(String(e?.message ?? e)), isError: true }
     }

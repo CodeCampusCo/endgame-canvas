@@ -110,9 +110,12 @@ create_graph({
   directions, which uncrosses edges automatically.
 - Parents are centred over the children they point at; leaves are centred under their parents.
 - The `frame` is re-fitted to what actually got drawn, so a node tldraw grew to fit an oversized
-  label sits inside it rather than being clipped at its edge. The *rows* are still spaced for an
-  ungrown node, though, so a grown one reaches into the row beneath it and comes back as an
-  `overlap` alongside the `text-overflow`. Shorten the label, or give that node its own frame.
+  label sits inside it rather than being clipped at its edge. Two limits worth knowing: the
+  *rows* are still spaced for an ungrown node, so a grown one reaches into the row beneath it and
+  comes back as an `overlap` alongside the `text-overflow`; and an arrow's own bounds do not
+  include its label, so neither the re-fit nor the `clipped` check can see one. **Keep edge
+  labels to a word or two** — a long one can spill past the frame and be clipped with nothing
+  reporting it. Read the picture back if an edge label is doing real work.
 
 **Because of that ordering pass, re-ordering `nodes[]` is no longer the lever it once was** — the
 layout re-sorts each layer regardless, and `nodes[]` order only breaks ties between nodes with no
@@ -172,9 +175,10 @@ mean computing coordinates. They don't any more — say the relationship instead
 - **`align_shapes` / `distribute_shapes` / `stack_shapes` / `pack_shapes`** — tldraw's own layout
   operations. `align_shapes` is the one that earns its keep here: boxes that are
   nearly-but-not-exactly aligned are what let an arrow slip diagonally through an unrelated node.
-  Hand them a frame's `shapeIds` as they come: they arrange the *shapes* and skip any arrows in
-  the list, which follow their endpoints anyway. They need two shapes to work with (three for
-  `distribute_shapes`) and say so rather than quietly doing nothing.
+  Hand them a frame's `shapeIds` as they come: they arrange the *shapes* and skip any **bound**
+  arrows in the list, which follow their endpoints anyway. (An arrow left loose is an ordinary
+  shape and is laid out with the rest.) They need two shapes to work with — three for
+  `distribute_shapes` — and say so rather than quietly doing nothing.
 - **`flip_shapes`** — mirrors whatever ids you give it, arrows included, and the arrowheads
   re-route to the correct ends.
 
@@ -214,7 +218,7 @@ absent when there is nothing wrong, so its presence is itself the signal.
 
 | `kind` | What happened | The fix |
 |---|---|---|
-| `text-overflow` | The label did not fit, so tldraw grew the box by `grewBy` px. It is now taller than the layout assumed and may be touching whatever is below it. | Shorten the label, or `update_shape({id, h})` with an `h` **at least the `h` the shape already reports** — that hands the size back to you and clears the growth. A smaller `h`, or a width-only change, deliberately leaves the growth in place and keeps reporting, because tldraw would otherwise crop the label to fit and never tell you. A label that merely *wrapped* is **not** reported: that is acceptable output, not a defect. Sticky notes are never reported — growing to fit is what they are for. |
+| `text-overflow` | The label did not fit, so tldraw grew the box by `grewBy` px. It is now taller than the layout assumed and may be touching whatever is below it. | **Only a shorter label clears it.** tldraw recomputes the growth when the text changes and at no other time, so no resize will shift it — a grown box measures `h + grewBy`, which is the `h` `read_frame` hands you. And never narrow a box to tidy it: a geo label is *clipped* by its box, so the words just vanish. A label that merely *wrapped* is **not** reported: that is acceptable output, not a defect. Sticky notes are never reported either — growing to fit is what they are for. |
 | `overlap` | Two boxes share pixels — `id` and `with`. | Move one: `place_shape`, `nudge_shapes`, or `update_shape`. |
 | `unbound-arrow` | An arrow is bound at only one end (`missing` says which). It looks connected and comes adrift the moment that shape moves. | `delete_shape` it and redo with `create_arrow({fromId, toId})`. |
 | `clipped` | A child of the frame sits entirely outside it. It is still a child — so it is in the shape list and is **not** a stray — but a frame clips its children, so it renders nowhere: not on screen, not in the image, not in an export. | Move it back inside with `nudge_shapes` or `update_shape({id, x, y})`, or lift it out of the frame with `update_shape({id, parent: 'page'})` to make it visible where it is. |

@@ -896,3 +896,69 @@ test('every tool declared to the client has a handler — the three-place recipe
   }
   expect(unhandled).toEqual([])
 })
+
+// --- the published schema is enforced, because the MCP SDK does not enforce it ---
+
+test('a missing required argument is refused before the canvas is touched', async () => {
+  let called = false
+  const dispatch = createDispatcher(async () => { called = true; return {} })
+  // place_shape without `side` used to fall through to the left branch and move the shape.
+  const r = await dispatch('place_shape', { id: 'shape:a', relativeTo: 'shape:b' })
+  expect(r.isError).toBe(true)
+  expect((r.content[0] as any).text).toBe('place_shape: missing required argument side')
+  expect(called).toBe(false)
+})
+
+test('several missing required arguments are named together', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  const r = await dispatch('nudge_shapes', { ids: ['shape:a'] })
+  expect((r.content[0] as any).text).toBe('nudge_shapes: missing required arguments dx, dy')
+})
+
+test('a misspelled enum is refused, naming the values that would have worked', async () => {
+  let called = false
+  const dispatch = createDispatcher(async () => { called = true; return {} })
+  // 'frme' used to export the whole page and report success.
+  const r = await dispatch('export_image', { target: 'frme', format: 'png', path: 'x.png' })
+  expect(r.isError).toBe(true)
+  expect((r.content[0] as any).text).toContain('target must be one of canvas, frame, selection')
+  expect(called).toBe(false)
+})
+
+test('an omitted optional enum is not an error — the browser applies its default', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => { seen = { tool, params }; return { id: 'shape:a' } })
+  const args = { nodes: [{ key: 'a', text: 'A' }], edges: [] } // no `layout`
+  await dispatch('create_graph', args)
+  expect(seen).toEqual({ tool: 'create_graph', params: args })
+})
+
+test('every enum the tools publish is checked, not just the ones someone remembered', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  const withEnums = (TOOL_DEFS as any[]).flatMap((t) =>
+    Object.entries(t.inputSchema.properties ?? {})
+      .filter(([, spec]: [string, any]) => spec.enum)
+      .map(([key]) => [t.name, key, t.inputSchema.required ?? []] as const),
+  )
+  expect(withEnums.length).toBeGreaterThan(5)
+  for (const [name, key, required] of withEnums) {
+    // Fill every required field with something valid — including other enums — so the field
+    // under test is what fires, not a neighbour.
+    const props = (TOOL_DEFS as any[]).find((t) => t.name === name).inputSchema.properties ?? {}
+    const args: Record<string, unknown> = Object.fromEntries(
+      required.map((k: string) => [k, props[k]?.enum ? props[k].enum[0] : 'x']),
+    )
+    args[key] = 'definitely-not-a-valid-value'
+    const r = await dispatch(name, args)
+    expect({ name, key, isError: r.isError }).toEqual({ name, key, isError: true })
+    expect((r.content[0] as any).text).toContain(`${key} must be one of`)
+  }
+})
+
+test('a name inherited from Object.prototype is an unknown tool, not a callable handler', async () => {
+  const dispatch = createDispatcher(async () => ({}))
+  for (const name of ['constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+    const r = await dispatch(name, {})
+    expect({ name, text: (r.content[0] as any).text }).toEqual({ name, text: `unknown tool: ${name}` })
+  }
+})
