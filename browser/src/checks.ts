@@ -38,8 +38,13 @@ export function findIssues(shapes: CheckShape[], bindings: CheckBinding[] = [], 
   // is NOT "the label wrapped" — a label wrapping to two lines inside a 100px box leaves growY
   // at 0. growY > 0 means the box is taller than it was asked to be, which is what silently
   // pushes it into whatever sits below.
+  // Only geo shapes: a sticky note grows to fit its text by design, has no w/h props to be
+  // resized with, and NoteShapeUtil recomputes growY on every render — so reporting one would be
+  // a complaint nobody can act on, and the issues list would never reach empty.
   for (const s of shapes) {
-    if (s.growY != null && s.growY > 0) issues.push({ kind: 'text-overflow', id: s.id, grewBy: s.growY })
+    if (s.type === 'geo' && s.growY != null && s.growY > 0) {
+      issues.push({ kind: 'text-overflow', id: s.id, grewBy: s.growY })
+    }
   }
 
   // Two boxes sharing pixels. Reported at most once per shape: a pile of N boxes is one thing

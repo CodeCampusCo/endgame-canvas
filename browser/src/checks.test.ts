@@ -125,3 +125,16 @@ test('a clipped shape can still be reported for overflow — the two are indepen
     { kind: 'clipped', id: 'a' },
   ])
 })
+
+test('a sticky note that grew is not reported — notes grow by design and have no w/h to resize', () => {
+  const note: CheckShape = { id: 'n', type: 'note', x: 0, y: 0, w: 200, h: 300, growY: 99 }
+  expect(findIssues([note])).toEqual([])
+})
+
+test('a geo box that grew is still reported next to an ignored note', () => {
+  const shapes: CheckShape[] = [
+    { id: 'n', type: 'note', x: 0, y: 0, w: 200, h: 300, growY: 99 },
+    box('g', 0, 600, { growY: 12 }),
+  ]
+  expect(findIssues(shapes)).toEqual([{ kind: 'text-overflow', id: 'g', grewBy: 12 }])
+})

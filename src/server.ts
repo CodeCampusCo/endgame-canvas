@@ -261,7 +261,8 @@ export const TOOL_DEFS = [
   },
   {
     name: 'update_shape',
-    description: 'Edit an existing shape — move, resize, relabel, or recolour it.',
+    description:
+      "Edit an existing shape — move, resize, relabel, or recolour it. On a box tldraw grew to fit an oversized label, an h at least as tall as the height the shape currently reports takes the size back and gives exactly that h; a smaller one leaves the growth alone rather than cropping the label out of sight.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -314,7 +315,7 @@ export const TOOL_DEFS = [
   {
     name: 'align_shapes',
     description:
-      'Line several shapes up on a shared edge or centre line, in one undo step. Boxes that are almost-but-not-quite aligned are what let an arrow run through an unrelated shape.',
+      "Line several shapes up on a shared edge or centre line, in one undo step. Boxes that are almost-but-not-quite aligned are what let an arrow run through an unrelated shape. Arrows in the id list are skipped — they follow their endpoints — so a frame's shapeIds can be passed as they come; needs two shapes left after that.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -335,7 +336,7 @@ export const TOOL_DEFS = [
   {
     name: 'distribute_shapes',
     description:
-      'Space several shapes evenly between the outermost two, in one undo step — even gaps without computing them.',
+      "Space several shapes evenly between the outermost two, in one undo step — even gaps without computing them. Arrows in the id list are skipped; needs three shapes left after that.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -351,7 +352,8 @@ export const TOOL_DEFS = [
   },
   {
     name: 'stack_shapes',
-    description: 'Stack several shapes into a row or column with an equal gap between them, in one undo step.',
+    description:
+      'Stack several shapes into a row or column with an equal gap between them, in one undo step. Arrows in the id list are skipped; needs two shapes left after that.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -369,7 +371,7 @@ export const TOOL_DEFS = [
   {
     name: 'pack_shapes',
     description:
-      'Pack several shapes into a tight grid centred on where they already are, in one undo step — tidies a scattered set.',
+      'Pack several shapes into a tight grid centred on where they already are, in one undo step — tidies a scattered set. Arrows in the id list are skipped; needs two shapes left after that.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -402,7 +404,7 @@ export const TOOL_DEFS = [
   {
     name: 'place_shape',
     description:
-      'Position a shape relative to another one — "to the right of X with a 40px gap" — instead of working out absolute coordinates. The other shape does not move.',
+      'Position a shape relative to another one — "to the right of X with a 40px gap" — instead of working out absolute coordinates. The other shape does not move. A bound arrow cannot be placed: it goes where the shapes it connects put it.',
     inputSchema: {
       type: 'object',
       properties: {

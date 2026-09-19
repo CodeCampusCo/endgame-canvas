@@ -157,17 +157,22 @@ mean computing coordinates. They don't any more — say the relationship instead
 
 - **`place_shape({id, relativeTo, side, gap})`** — "put this to the right of that, 40px apart."
   `side` is `right`/`left`/`above`/`below`; `align` (`center` by default) lines the two up on the
-  other axis. The shape named in `relativeTo` does not move.
+  other axis. The shape named in `relativeTo` does not move. A *bound* arrow cannot be placed —
+  it goes where the shapes it connects put it — so move those instead.
 - **`nudge_shapes({ids, dx, dy})`** — shift a whole group by one offset. `list_frames` reports each
   frame's `shapeIds`, so "move everything in *Request flow* down 50" is two calls, not one per
   shape. Nudging a frame's children does **not** take them out of the frame the way dragging
   would: pushed past the edge they stay children and get clipped away to nothing. `read_frame`
   reports that as a `clipped` issue — move the frame itself if you meant to move the whole
   diagram.
-- **`align_shapes` / `distribute_shapes` / `stack_shapes` / `pack_shapes` / `flip_shapes`** —
-  tldraw's own layout operations over any set of ids. `align_shapes` is the one that earns its
-  keep here: boxes that are nearly-but-not-exactly aligned are what let an arrow slip diagonally
-  through an unrelated node.
+- **`align_shapes` / `distribute_shapes` / `stack_shapes` / `pack_shapes`** — tldraw's own layout
+  operations. `align_shapes` is the one that earns its keep here: boxes that are
+  nearly-but-not-exactly aligned are what let an arrow slip diagonally through an unrelated node.
+  Hand them a frame's `shapeIds` as they come: they arrange the *shapes* and skip any arrows in
+  the list, which follow their endpoints anyway. They need two shapes to work with (three for
+  `distribute_shapes`) and say so rather than quietly doing nothing.
+- **`flip_shapes`** — mirrors whatever ids you give it, arrows included, and the arrowheads
+  re-route to the correct ends.
 
 Every one takes explicit `ids` — there is no "whole frame" shorthand, because the ids are one
 cheap `list_frames` away and an ambiguous target is worse than an extra call. Each lands as a
@@ -205,13 +210,15 @@ absent when there is nothing wrong, so its presence is itself the signal.
 
 | `kind` | What happened | The fix |
 |---|---|---|
-| `text-overflow` | The label did not fit, so tldraw grew the box by `grewBy` px. It is now taller than the layout assumed and may be touching whatever is below it. | Shorten the label, or `update_shape({id, h})` to give it the room it asked for — an explicit resize hands the size back to you and clears the growth. A label that merely *wrapped* is **not** reported: that is acceptable output, not a defect. |
+| `text-overflow` | The label did not fit, so tldraw grew the box by `grewBy` px. It is now taller than the layout assumed and may be touching whatever is below it. | Shorten the label, or `update_shape({id, h})` with an `h` **at least the `h` the shape already reports** — that hands the size back to you and clears the growth. A smaller `h`, or a width-only change, deliberately leaves the growth in place and keeps reporting, because tldraw would otherwise crop the label to fit and never tell you. A label that merely *wrapped* is **not** reported: that is acceptable output, not a defect. Sticky notes are never reported — growing to fit is what they are for. |
 | `overlap` | Two boxes share pixels — `id` and `with`. | Move one: `place_shape`, `nudge_shapes`, or `update_shape`. |
 | `unbound-arrow` | An arrow is bound at only one end (`missing` says which). It looks connected and comes adrift the moment that shape moves. | `delete_shape` it and redo with `create_arrow({fromId, toId})`. |
 | `clipped` | A child of the frame sits entirely outside it. It is still a child — so it is in the shape list and is **not** a stray — but a frame clips its children, so it renders nowhere: not on screen, not in the image, not in an export. | Move it back inside with `nudge_shapes` or `update_shape({id, x, y})`, or lift it out of the frame with `update_shape({id, parent: 'page'})` to make it visible where it is. |
 
 Each shape is reported once per kind, so a pile of boxes is one complaint rather than one per
-pair. Fix, then read again — anything hidden behind the first fix surfaces on the next pass.
+pair. Fix, then read again — anything hidden behind the first fix surfaces on the next pass, so a
+badly tangled frame can take several rounds to come back clean. If the same issue survives a fix,
+the fix was the wrong one; change the approach rather than repeating it.
 
 **`strays` is reported alongside them**, and it is not about the drawing but about the frame. tldraw drops a shape from a frame the moment it is dragged past the edge and never takes
 it back on its own — not when the frame is resized to cover it again, not when the shape is moved

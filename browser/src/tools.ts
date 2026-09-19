@@ -167,6 +167,38 @@ const BATCH_OPS: Record<string, (editor: Editor, ids: TLShapeId[], p: any) => vo
   flip_shapes: (e, ids, p) => e.flipShapes(ids, p.axis),
 }
 
+// align/distribute/stack/pack merge shapes joined by an arrow that is ITSELF in the id list
+// into one cluster, then return early when fewer than this many clusters remain. A connected
+// diagram collapses to one cluster, so handing them a frame's shapeIds — exactly what list_frames
+// offers — moves nothing while still reporting a count. Bound arrows follow their shapes anyway,
+// so drop them and arrange the shapes. flip_shapes does no clustering and takes ids as given.
+const CLUSTERING_MIN: Record<string, number> = {
+  align_shapes: 2,
+  distribute_shapes: 3,
+  stack_shapes: 2,
+  pack_shapes: 2,
+}
+
+// The MCP SDK hands tool arguments through without checking inputSchema, so an enum typo would
+// otherwise reach tldraw, match nothing, do nothing, and come back as a success.
+const ENUM_PARAMS: Record<string, Record<string, readonly string[]>> = {
+  align_shapes: { edge: ['left', 'right', 'top', 'bottom', 'center-horizontal', 'center-vertical'] },
+  distribute_shapes: { axis: ['horizontal', 'vertical'] },
+  stack_shapes: { axis: ['horizontal', 'vertical'] },
+  flip_shapes: { axis: ['horizontal', 'vertical'] },
+  place_shape: { side: ['right', 'left', 'above', 'below'], align: ['center', 'start', 'end'] },
+}
+
+function checkEnums(tool: string, params: any) {
+  if (!Object.hasOwn(ENUM_PARAMS, tool)) return
+  for (const [key, allowed] of Object.entries(ENUM_PARAMS[tool])) {
+    const value = params?.[key]
+    if (value !== undefined && !allowed.includes(value)) {
+      throw new Error(tool + ': ' + key + ' must be one of ' + allowed.join(', ') + ' — got ' + JSON.stringify(value))
+    }
+  }
+}
+
 // nudgeShapes reads each shape without a null check, so one stale id would throw mid-batch.
 // Filter first, and refuse a call that would move nothing rather than report a silent success.
 function existingIds(editor: Editor, ids: string[]): TLShapeId[] {
@@ -180,6 +212,7 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   // ...(color ? {...} : {}) spread below is a no-op and tldraw's own default applies —
   // behaviour is unchanged from before this feature existed.
   const color = agent ? colorForAgent(agent) : undefined
+  checkEnums(tool, params)
   // read_canvas/get_snapshot/list_frames/read_frame all call editor.getCurrentPageShapes(),
   // so they're inherently scoped to the current page — switch_page re-scopes them for free.
   if (tool === 'read_canvas') {
@@ -235,8 +268,18 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     const strays = straysOver(editor, frame)
     const issues = findIssues(children.map((s) => checkShape(editor, s)), bindings, editor.getShapePageBounds(frame))
     if (children.length === 0) return { url: null, width: 0, height: 0, shapes: [], bindings: [], frameId: frame.id, strays, issues }
-    const { blob, width, height } = await editor.toImage(children, { format: 'png', background: true })
-    const url = await blobToDataUrl(blob)
+    // Every child can render to nothing — all of them clipped outside the frame — and toImage
+    // throws on a zero-area region. That is precisely when the issues matter most, so lose the
+    // picture rather than the whole payload.
+    let url: string | null = null
+    let width = 0
+    let height = 0
+    try {
+      const img = await editor.toImage(children, { format: 'png', background: true })
+      width = img.width
+      height = img.height
+      url = await blobToDataUrl(img.blob)
+    } catch {}
     return { url, width, height, shapes: children.map((s) => shapeSnapshot(editor, s)), bindings, frameId: frame.id, strays, issues }
   }
   if (tool === 'create_shape') {
@@ -332,11 +375,15 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     const props: Record<string, unknown> = {}
     if (w !== undefined) props.w = w
     if (h !== undefined) props.h = h
-    // An explicit resize means the caller owns the size, so clear the growth tldraw added to fit
-    // a label — which is exactly what dragging a resize handle does (GeoShapeUtil.onResize sets
-    // growY: 0). Without this the shape ends up h + growY tall, so asking for 320 gives 430 and
-    // a text-overflow issue never clears no matter how much room you give it.
-    if ((w !== undefined || h !== undefined) && Object.hasOwn(shape.props, 'growY')) props.growY = 0
+    // A height at least as tall as the box already is takes the size back from tldraw, so the
+    // caller gets exactly the h they asked for and the text-overflow clears. Anything smaller —
+    // or a width-only change, which re-wraps the label taller — leaves the growth alone: tldraw
+    // recomputes growY only when the text itself changes, so clearing it there would crop the
+    // label permanently, with nothing left to report that it happened.
+    const grown = shape.props as { growY?: number; h?: number }
+    if (h !== undefined && grown.growY != null && grown.h != null && h >= grown.h + grown.growY) {
+      props.growY = 0
+    }
     if (color !== undefined) props.color = color
     if (fill !== undefined) props.fill = fill
     if (text !== undefined) {
@@ -500,7 +547,16 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   // would match here and be called as if they were ops — returning a fake success instead of
   // falling through to the unknown-tool throw at the bottom.
   if (Object.hasOwn(BATCH_OPS, tool)) {
-    const ids = existingIds(editor, params.ids)
+    let ids = existingIds(editor, params.ids)
+    if (Object.hasOwn(CLUSTERING_MIN, tool)) {
+      const min = CLUSTERING_MIN[tool]
+      ids = ids.filter((id) => editor.getShape(id)!.type !== 'arrow')
+      // Throw rather than let tldraw return early in silence: a no-op that reports a count is
+      // indistinguishable from work done, and the caller has no other way to find out.
+      if (ids.length < min) {
+        throw new Error(tool + ' needs at least ' + min + ' shapes that are not arrows — got ' + ids.length)
+      }
+    }
     editor.run(() => BATCH_OPS[tool](editor, ids, params))
     return { count: ids.length }
   }
@@ -510,9 +566,17 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     if (!shape) throw new Error('shape not found: ' + id)
     const anchor = editor.getShapePageBounds(relativeTo)
     if (!anchor) throw new Error('shape not found: ' + relativeTo)
+    // A bound arrow's position comes from its bindings, not its x/y — tldraw drags it straight
+    // back to the shapes it connects, so placing one reports a position it never reached. Say so
+    // instead. An arrow left loose (its target deleted) has no bindings and places fine.
+    if (shape.type === 'arrow') {
+      const bound = getArrowBindings(editor, shape as Extract<TLShape, { type: 'arrow' }>)
+      if (bound.start || bound.end) {
+        throw new Error('bound arrow follows the shapes it connects — place those instead: ' + id)
+      }
+    }
     const b = editor.getShapePageBounds(shape)!
     const vertical = side === 'above' || side === 'below'
-    if (!vertical && side !== 'left' && side !== 'right') throw new Error('unknown side: ' + side)
     // The gap is between the two bounding boxes, so the shape's near edge lands `gap` from the
     // anchor's; on the other axis the two are lined up according to `align`.
     const lineUp = (start: number, extent: number, own: number) =>
@@ -527,9 +591,11 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
         ? anchor.y + anchor.h + gap
         : anchor.y - gap - b.h
       : lineUp(anchor.y, anchor.h, b.h)
-    // Read tools report page space; a shape's own x/y are parent-local.
-    const local = editor.getPointInParentSpace(shape, { x, y })
-    editor.updateShape({ id, type: shape.type, x: local.x, y: local.y })
+    // Move by the delta rather than writing the target into x/y: a shape's own origin is not
+    // its page-bounds top-left for arrows, rotated shapes or draw strokes, so assigning the
+    // target directly would land them somewhere other than the position this call reports.
+    // nudgeShapes also does the page-space to parent-local conversion for a frame's children.
+    editor.nudgeShapes([id], { x: x - b.x, y: y - b.y })
     return { id, x, y }
   }
   if (tool === 'list_agents') {
