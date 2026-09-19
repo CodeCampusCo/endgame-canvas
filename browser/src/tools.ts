@@ -491,7 +491,10 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     })
     return { nodeId, arrowId }
   }
-  if (tool in BATCH_OPS) {
+  // hasOwn, not `in`: `in` walks the prototype chain, so 'constructor', 'toString' and friends
+  // would match here and be called as if they were ops — returning a fake success instead of
+  // falling through to the unknown-tool throw at the bottom.
+  if (Object.hasOwn(BATCH_OPS, tool)) {
     const ids = existingIds(editor, params.ids)
     editor.run(() => BATCH_OPS[tool](editor, ids, params))
     return { count: ids.length }
