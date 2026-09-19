@@ -150,6 +150,29 @@ follows the shapes when either moves.
 - **Let the layout breathe.** Don't fight the even spacing. If two clusters are unrelated, put
   them in separate frames rather than squeezing them together.
 
+### Fixing a layout without doing arithmetic
+
+`create_graph` places nodes for you, but hand-placed shapes and after-the-fact repairs used to
+mean computing coordinates. They don't any more — say the relationship instead:
+
+- **`place_shape({id, relativeTo, side, gap})`** — "put this to the right of that, 40px apart."
+  `side` is `right`/`left`/`above`/`below`; `align` (`center` by default) lines the two up on the
+  other axis. The shape named in `relativeTo` does not move.
+- **`nudge_shapes({ids, dx, dy})`** — shift a whole group by one offset. `list_frames` reports each
+  frame's `shapeIds`, so "move everything in *Request flow* down 50" is two calls, not one per
+  shape. Nudging a frame's children does **not** take them out of the frame the way dragging
+  would: pushed past the edge they stay children and get clipped away to nothing. `read_frame`
+  reports that as a `clipped` issue — move the frame itself if you meant to move the whole
+  diagram.
+- **`align_shapes` / `distribute_shapes` / `stack_shapes` / `pack_shapes` / `flip_shapes`** —
+  tldraw's own layout operations over any set of ids. `align_shapes` is the one that earns its
+  keep here: boxes that are nearly-but-not-exactly aligned are what let an arrow slip diagonally
+  through an unrelated node.
+
+Every one takes explicit `ids` — there is no "whole frame" shorthand, because the ids are one
+cheap `list_frames` away and an ambiguous target is worse than an extra call. Each lands as a
+single undo step, so the human takes a whole rearrangement back with one ⌘Z.
+
 ### The emphasis you actually have
 
 `update_shape({id, color, fill})` is the whole toolkit — there is no border-style or line-weight
@@ -172,24 +195,44 @@ and you can't — pick good words instead.
 
 ## Verify what you drew — don't trust the plan
 
-After drawing, **`read_frame(<frame name>)`** to get the cropped image plus the shapes and their
-arrow bindings. Look for the failure modes that a coordinate plan can't reveal:
+After drawing, **`read_frame(<frame name>)`** to get the cropped image plus the shapes, their
+arrow bindings, and the defects that were computed for you.
 
-- boxes overlapping or text spilling outside its box,
+### What the tools hand you — no looking required
+
+`read_frame` reports `issues`, and `create_graph` reports them the moment it draws. The field is
+absent when there is nothing wrong, so its presence is itself the signal.
+
+| `kind` | What happened | The fix |
+|---|---|---|
+| `text-overflow` | The label did not fit, so tldraw grew the box by `grewBy` px. It is now taller than the layout assumed and may be touching whatever is below it. | Shorten the label, or `update_shape({id, w, h})` to give it room. A label that merely *wrapped* is **not** reported — that is acceptable output, not a defect. |
+| `overlap` | Two boxes share pixels — `id` and `with`. | Move one: `place_shape`, `nudge_shapes`, or `update_shape`. |
+| `unbound-arrow` | An arrow is bound at only one end (`missing` says which). It looks connected and comes adrift the moment that shape moves. | `delete_shape` it and redo with `create_arrow({fromId, toId})`. |
+| `clipped` | A child of the frame sits entirely outside it. It is still a child — so it is in the shape list and is **not** a stray — but a frame clips its children, so it renders nowhere: not on screen, not in the image, not in an export. | Move it back inside with `nudge_shapes` or `update_shape({id, x, y})`, or lift it out of the frame with `update_shape({id, parent: 'page'})` to make it visible where it is. |
+
+Each shape is reported once per kind, so a pile of boxes is one complaint rather than one per
+pair. Fix, then read again — anything hidden behind the first fix surfaces on the next pass.
+
+**`strays` is the fourth thing reported to you**, and it is not about the drawing but about the
+frame. tldraw drops a shape from a frame the moment it is dragged past the edge and never takes
+it back on its own — not when the frame is resized to cover it again, not when the shape is moved
+back inside. `read_frame` and `export_image` report those shapes as `strays`; the field is absent
+when there are none. They are missing from the image, the shape list, and any frame export, while
+the diagram still looks complete on screen, so an export made in that state is quietly short. Put
+each one back with `update_shape({id, parent: '<frame name>'})`, which is the only thing that
+undoes the drop.
+
+### What only your eye can do
+
+The image is there for the judgements arithmetic cannot make:
+
 - arrows crossing each other (cut an edge, merge two nodes, or split the frame),
-- an arrow that isn't actually bound (it won't appear in the bindings) — recreate it with
-  `create_arrow({fromId, toId})`,
-- **`strays` in the result.** tldraw drops a shape from a frame the moment it is dragged past
-  the edge and never takes it back on its own — not when the frame is resized to cover it
-  again, not when the shape is moved back inside. `read_frame` and `export_image` report those
-  shapes as `strays`; the field is absent when there are none. They are missing from the image,
-  the shape list, and any frame export, while the diagram still looks complete on screen, so an
-  export made in that state is quietly short. Put each one back with
-  `update_shape({id, parent: '<frame name>'})`, which is the only thing that undoes the drop.
+- composition — one heavy corner, a stranded node, a frame that is mostly empty,
+- reading order — does the eye travel *with* the arrows, or against them?
 
-Fix with `update_shape` / `delete_shape`, then read again. Two or three quick read-fix passes is
-normal and is exactly how a good diagram gets made here — the same see-it-then-correct loop a
-human uses. Only stop when the frame reads cleanly at a glance.
+Fix with `update_shape` / `delete_shape` / the arrange tools above, then read again. Two or three
+quick read-fix passes is normal and is exactly how a good diagram gets made here — the same
+see-it-then-correct loop a human uses. Only stop when the frame reads cleanly at a glance.
 
 **Test drawings go on their own page.** `create_page` then `switch_page` before you experiment —
 the human's current page is their workspace, and probe shapes landing in the middle of it are
@@ -224,10 +267,14 @@ page was already open, so check the switch succeeded first.
 | Extend an existing diagram by one node | `create_connected` |
 | A single non-graph shape | `create_shape` (type/x/y/text only) |
 | Recolour / move / resize / relabel | `update_shape` (x/y/w/h/text/color/fill) |
+| Put a shape beside another one | `place_shape` (side + gap, no coordinates) |
+| Move a whole group | `nudge_shapes` (dx/dy) |
+| Tidy a set of shapes | `align_shapes`, `distribute_shapes`, `stack_shapes`, `pack_shapes`, `flip_shapes` |
+| The ids of everything in a frame | `list_frames` → `shapeIds` |
 | Put a stray shape back into its frame | `update_shape({parent})` — a frame name, or `'page'` to lift it out |
 | Bound arrow between two shapes | `create_arrow` |
 | Annotation / legend | `create_note` |
-| **See what you actually drew** | `read_frame` (crop + shapes + bindings) |
+| **See what you actually drew** | `read_frame` (crop + shapes + bindings + `issues`) |
 | Read freehand / whole board | `read_canvas`, `get_snapshot` |
 | Scratch space for experiments | `create_page`, `switch_page` |
 | Point the human's view | `zoom_to_frame`, `select` |

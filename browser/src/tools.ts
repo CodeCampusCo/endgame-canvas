@@ -1,5 +1,6 @@
 import { type Editor, type TLShape, type TLShapeId, type IndexKey, toRichText, createShapeId, getArrowBindings, getIndices, PageRecordType } from 'tldraw'
 import { graphPositions, NODE_W, NODE_H } from './graph'
+import { findIssues, type CheckShape } from './checks'
 
 // Real tldraw DefaultColorStyle enum values (verified in
 // @tldraw/tlschema/dist-cjs/styles/TLColorStyle.js: defaultColorNames). Excludes
@@ -48,6 +49,21 @@ function shapeSnapshot(editor: Editor, s: TLShape) {
     w: b?.w,
     h: b?.h,
     text: editor.getShapeUtil(s).getText(s) ?? '',
+  }
+}
+
+// The check module's view of a shape: page bounds — which already include growY, since tldraw
+// reports a grown box at its grown height — plus the raw growY that says it was grown at all.
+function checkShape(editor: Editor, s: TLShape): CheckShape {
+  const b = editor.getShapePageBounds(s)
+  return {
+    id: s.id,
+    type: s.type,
+    x: b?.x ?? 0,
+    y: b?.y ?? 0,
+    w: b?.w ?? 0,
+    h: b?.h ?? 0,
+    growY: (s.props as { growY?: number }).growY,
   }
 }
 
@@ -138,6 +154,27 @@ function createGeoNode(editor: Editor, geo: string, x: number, y: number, text: 
   return id
 }
 
+// tldraw's Editor already implements every multi-shape move; these tools are the thin exposure
+// of them. Each takes explicit `ids` — there is no "ids or frame" alternative, because a schema
+// cannot express "exactly one of these two", which would leave the tool depending on the caller
+// to choose correctly. list_frames reports shapeIds for the "everything in this frame" case.
+const BATCH_OPS: Record<string, (editor: Editor, ids: TLShapeId[], p: any) => void> = {
+  nudge_shapes: (e, ids, p) => e.nudgeShapes(ids, { x: p.dx, y: p.dy }),
+  align_shapes: (e, ids, p) => e.alignShapes(ids, p.edge),
+  distribute_shapes: (e, ids, p) => e.distributeShapes(ids, p.axis),
+  stack_shapes: (e, ids, p) => e.stackShapes(ids, p.axis, p.gap),
+  pack_shapes: (e, ids, p) => e.packShapes(ids, p.gap),
+  flip_shapes: (e, ids, p) => e.flipShapes(ids, p.axis),
+}
+
+// nudgeShapes reads each shape without a null check, so one stale id would throw mid-batch.
+// Filter first, and refuse a call that would move nothing rather than report a silent success.
+function existingIds(editor: Editor, ids: string[]): TLShapeId[] {
+  const found = (ids ?? []).filter((id) => editor.getShape(id as TLShapeId)) as TLShapeId[]
+  if (found.length === 0) throw new Error('no shapes found for ids: ' + (ids ?? []).join(', '))
+  return found
+}
+
 export async function runTool(editor: Editor, tool: string, params: any, agent?: string) {
   // Absent agent (no CANVAS_AGENT, e.g. an unlabelled probe) → undefined, so every
   // ...(color ? {...} : {}) spread below is a no-op and tldraw's own default applies —
@@ -167,6 +204,9 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   if (tool === 'list_frames') {
     return getFrames(editor).map((s) => {
       const b = editor.getShapePageBounds(s)
+      // shapeIds so the batch tools can act on a frame's contents: they take explicit ids, and
+      // this is the cheap text-only way to get them — read_frame would cost a raster.
+      const childIds = editor.getSortedChildIdsForParent(s.id)
       return {
         id: s.id,
         name: s.props.name,
@@ -174,7 +214,8 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
         y: b?.y,
         w: b?.w,
         h: b?.h,
-        shapeCount: editor.getSortedChildIdsForParent(s.id).length,
+        shapeCount: childIds.length,
+        shapeIds: childIds,
       }
     })
   }
@@ -192,10 +233,11 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
         return { arrowId: arrow.id, start: b.start?.toId ?? null, end: b.end?.toId ?? null }
       })
     const strays = straysOver(editor, frame)
-    if (children.length === 0) return { url: null, width: 0, height: 0, shapes: [], bindings: [], frameId: frame.id, strays }
+    const issues = findIssues(children.map((s) => checkShape(editor, s)), bindings, editor.getShapePageBounds(frame))
+    if (children.length === 0) return { url: null, width: 0, height: 0, shapes: [], bindings: [], frameId: frame.id, strays, issues }
     const { blob, width, height } = await editor.toImage(children, { format: 'png', background: true })
     const url = await blobToDataUrl(blob)
-    return { url, width, height, shapes: children.map((s) => shapeSnapshot(editor, s)), bindings, frameId: frame.id, strays }
+    return { url, width, height, shapes: children.map((s) => shapeSnapshot(editor, s)), bindings, frameId: frame.id, strays, issues }
   }
   if (tool === 'create_shape') {
     const { type, x, y, text } = params
@@ -428,7 +470,10 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       }
     })
 
-    return { ids, arrowIds }
+    // Check what was just drawn: a label too long for its node grows the box (see checks.ts),
+    // and the caller should learn that without spending a read_frame round trip to find out.
+    const issues = findIssues(Object.values(ids).map((id) => checkShape(editor, editor.getShape(id)!)))
+    return { ids, arrowIds, ...(issues.length ? { issues } : {}) }
   }
   if (tool === 'create_connected') {
     const { fromId, text, shape = 'rectangle', direction = 'right' } = params
@@ -445,6 +490,39 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       arrowId = bindArrow(editor, fromId, nodeId, undefined, color)
     })
     return { nodeId, arrowId }
+  }
+  if (tool in BATCH_OPS) {
+    const ids = existingIds(editor, params.ids)
+    editor.run(() => BATCH_OPS[tool](editor, ids, params))
+    return { count: ids.length }
+  }
+  if (tool === 'place_shape') {
+    const { id, relativeTo, side, gap = 40, align = 'center' } = params
+    const shape = editor.getShape(id)
+    if (!shape) throw new Error('shape not found: ' + id)
+    const anchor = editor.getShapePageBounds(relativeTo)
+    if (!anchor) throw new Error('shape not found: ' + relativeTo)
+    const b = editor.getShapePageBounds(shape)!
+    const vertical = side === 'above' || side === 'below'
+    if (!vertical && side !== 'left' && side !== 'right') throw new Error('unknown side: ' + side)
+    // The gap is between the two bounding boxes, so the shape's near edge lands `gap` from the
+    // anchor's; on the other axis the two are lined up according to `align`.
+    const lineUp = (start: number, extent: number, own: number) =>
+      align === 'start' ? start : align === 'end' ? start + extent - own : start + (extent - own) / 2
+    const x = vertical
+      ? lineUp(anchor.x, anchor.w, b.w)
+      : side === 'right'
+        ? anchor.x + anchor.w + gap
+        : anchor.x - gap - b.w
+    const y = vertical
+      ? side === 'below'
+        ? anchor.y + anchor.h + gap
+        : anchor.y - gap - b.h
+      : lineUp(anchor.y, anchor.h, b.h)
+    // Read tools report page space; a shape's own x/y are parent-local.
+    const local = editor.getPointInParentSpace(shape, { x, y })
+    editor.updateShape({ id, type: shape.type, x: local.x, y: local.y })
+    return { id, x, y }
   }
   if (tool === 'list_agents') {
     return Array.from(agentColors, ([agent, color]) => ({ agent, color }))

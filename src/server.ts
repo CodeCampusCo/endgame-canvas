@@ -121,7 +121,7 @@ export function createCanvasClient(relayUrl: string, opts: { timeoutMs?: number;
   return { call, close }
 }
 
-const TOOL_DEFS = [
+export const TOOL_DEFS = [
   {
     name: 'read_canvas',
     description:
@@ -216,13 +216,14 @@ const TOOL_DEFS = [
   },
   {
     name: 'list_frames',
-    description: 'List every frame on the page with id, name, position, size, and how many shapes it contains.',
+    description:
+      "List every frame on the page with id, name, position, size, how many shapes it contains, and their shapeIds — the ids to hand to the batch tools (nudge_shapes, align_shapes, and the rest).",
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'read_frame',
     description:
-      "Read one frame's contents: a cropped PNG of its children, their structured shape data, and arrow bindings. Also reports `strays` — shapes that overlap the frame but are not in it, so they are missing from the image and the shape list. Only present when there are some.",
+      "Read one frame's contents: a cropped PNG of its children, their structured shape data, and arrow bindings. Also reports `issues` — text that outgrew its box, boxes that overlap, arrows bound at only one end, and children pushed outside the frame, where they are clipped away and invisible — so the image is left for what only an eye can judge. And `strays`: shapes that overlap the frame but are not in it, so they are missing from the image and the shape list. Each field is present only when there is something to report.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -293,6 +294,136 @@ const TOOL_DEFS = [
     },
   },
   {
+    name: 'nudge_shapes',
+    description:
+      "Move several shapes by the same offset in one undo step — e.g. shift a whole diagram down to make room above it. Nudging a frame's children does not take them out of the frame: pushed past its edge they are clipped away and become invisible, which read_frame then reports as a `clipped` issue.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Shape ids to act on. list_frames reports a frame's shapeIds when you want everything in it.",
+        },
+        dx: { type: 'number', description: 'Horizontal offset in page pixels; negative moves left.' },
+        dy: { type: 'number', description: 'Vertical offset in page pixels; negative moves up.' },
+      },
+      required: ['ids', 'dx', 'dy'],
+    },
+  },
+  {
+    name: 'align_shapes',
+    description:
+      'Line several shapes up on a shared edge or centre line, in one undo step. Boxes that are almost-but-not-quite aligned are what let an arrow run through an unrelated shape.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Shape ids to act on. list_frames reports a frame's shapeIds when you want everything in it.",
+        },
+        edge: {
+          type: 'string',
+          enum: ['left', 'right', 'top', 'bottom', 'center-horizontal', 'center-vertical'],
+          description: 'The edge or centre line to line them up on.',
+        },
+      },
+      required: ['ids', 'edge'],
+    },
+  },
+  {
+    name: 'distribute_shapes',
+    description:
+      'Space several shapes evenly between the outermost two, in one undo step — even gaps without computing them.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Shape ids to act on. list_frames reports a frame's shapeIds when you want everything in it.",
+        },
+        axis: { type: 'string', enum: ['horizontal', 'vertical'], description: 'The axis to spread them along.' },
+      },
+      required: ['ids', 'axis'],
+    },
+  },
+  {
+    name: 'stack_shapes',
+    description: 'Stack several shapes into a row or column with an equal gap between them, in one undo step.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Shape ids to act on. list_frames reports a frame's shapeIds when you want everything in it.",
+        },
+        axis: { type: 'string', enum: ['horizontal', 'vertical'], description: 'Row (horizontal) or column (vertical).' },
+        gap: { type: 'number', description: "Pixels between adjacent shapes. Defaults to tldraw's own spacing." },
+      },
+      required: ['ids', 'axis'],
+    },
+  },
+  {
+    name: 'pack_shapes',
+    description:
+      'Pack several shapes into a tight grid centred on where they already are, in one undo step — tidies a scattered set.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Shape ids to act on. list_frames reports a frame's shapeIds when you want everything in it.",
+        },
+        gap: { type: 'number', description: "Pixels between packed shapes. Defaults to tldraw's own spacing." },
+      },
+      required: ['ids'],
+    },
+  },
+  {
+    name: 'flip_shapes',
+    description: 'Mirror several shapes across the centre of their combined bounds, in one undo step.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Shape ids to act on. list_frames reports a frame's shapeIds when you want everything in it.",
+        },
+        axis: { type: 'string', enum: ['horizontal', 'vertical'], description: 'The axis to mirror across.' },
+      },
+      required: ['ids', 'axis'],
+    },
+  },
+  {
+    name: 'place_shape',
+    description:
+      'Position a shape relative to another one — "to the right of X with a 40px gap" — instead of working out absolute coordinates. The other shape does not move.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The shape to move.' },
+        relativeTo: { type: 'string', description: 'The shape to position it against; this one stays put.' },
+        side: {
+          type: 'string',
+          enum: ['right', 'left', 'above', 'below'],
+          description: 'Which side of the other shape to put it on.',
+        },
+        gap: { type: 'number', description: 'Pixels between the two shapes. Default 40.' },
+        align: {
+          type: 'string',
+          enum: ['center', 'start', 'end'],
+          description: "How to line the two up on the other axis. Default 'center'.",
+        },
+      },
+      required: ['id', 'relativeTo', 'side'],
+    },
+  },
+  {
     name: 'zoom_to_frame',
     description: 'Move the camera to a named frame — point the shared view at it.',
     inputSchema: {
@@ -342,7 +473,7 @@ const TOOL_DEFS = [
   {
     name: 'create_graph',
     description:
-      'Build a node-and-edge diagram in one step: lay out nodes (tree or grid), create each as a shape, and connect edges with bound arrows. Optionally wrap it all in a named frame. Works for any graph — flowchart, org chart, dependency graph, etc.',
+      'Build a node-and-edge diagram in one step: lay out nodes (tree or grid), create each as a shape, and connect edges with bound arrows. Optionally wrap it all in a named frame. Works for any graph — flowchart, org chart, dependency graph, etc. Reports `issues` when a label outgrew its node or two nodes overlap.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -454,6 +585,7 @@ export function createDispatcher(call: CanvasCall) {
       const r = await call('read_frame', args)
       // strays only appear when there are some: a frame that is intact reads exactly as before.
       const payload: Record<string, unknown> = { shapes: r.shapes, bindings: r.bindings, frameId: r.frameId }
+      if (r.issues?.length) payload.issues = r.issues
       if (r.strays?.length) payload.strays = r.strays
       const text: ToolContent = { type: 'text', text: JSON.stringify(payload, null, 2) }
       if (r.url == null) return { content: [text] }
@@ -492,6 +624,27 @@ export function createDispatcher(call: CanvasCall) {
     },
     async create_connected(args) {
       return asText(JSON.stringify(await call('create_connected', args)))
+    },
+    async nudge_shapes(args) {
+      return asText(JSON.stringify(await call('nudge_shapes', args)))
+    },
+    async align_shapes(args) {
+      return asText(JSON.stringify(await call('align_shapes', args)))
+    },
+    async distribute_shapes(args) {
+      return asText(JSON.stringify(await call('distribute_shapes', args)))
+    },
+    async stack_shapes(args) {
+      return asText(JSON.stringify(await call('stack_shapes', args)))
+    },
+    async pack_shapes(args) {
+      return asText(JSON.stringify(await call('pack_shapes', args)))
+    },
+    async flip_shapes(args) {
+      return asText(JSON.stringify(await call('flip_shapes', args)))
+    },
+    async place_shape(args) {
+      return asText(JSON.stringify(await call('place_shape', args)))
     },
     async list_agents() {
       return asText(JSON.stringify(await call('list_agents', {}), null, 2))

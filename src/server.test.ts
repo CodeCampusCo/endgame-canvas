@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdir, rm, unlink } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { startRelay } from './relay'
-import { createCanvasClient, createDispatcher } from './server'
+import { createCanvasClient, createDispatcher, TOOL_DEFS } from './server'
 
 const TEST_DIR = resolve('test-output')
 await mkdir(TEST_DIR, { recursive: true })
@@ -736,4 +736,151 @@ test('dispatch list_agents → pretty JSON text', async () => {
   expect(await dispatch('list_agents', {})).toEqual({
     content: [{ type: 'text', text: JSON.stringify(agents, null, 2) }],
   })
+})
+
+// --- Structural checks: issues ride along with read_frame and create_graph ---
+
+test('dispatch read_frame surfaces issues alongside the shapes', async () => {
+  const issues = [
+    { kind: 'text-overflow', id: 'shape:a', grewBy: 34 },
+    { kind: 'overlap', id: 'shape:a', with: 'shape:b' },
+  ]
+  const dispatch = createDispatcher(async () => ({
+    url: null,
+    width: 0,
+    height: 0,
+    shapes: [],
+    bindings: [],
+    frameId: 'shape:f1',
+    issues,
+  }))
+  const text = (await dispatch('read_frame', { name: 'f' })).content[0] as { text: string }
+  expect(JSON.parse(text.text)).toEqual({ shapes: [], bindings: [], frameId: 'shape:f1', issues })
+})
+
+test('dispatch read_frame omits issues entirely when the frame is clean', async () => {
+  const dispatch = createDispatcher(async () => ({
+    url: null,
+    width: 0,
+    height: 0,
+    shapes: [],
+    bindings: [],
+    frameId: 'shape:f1',
+    issues: [],
+    strays: [],
+  }))
+  const text = (await dispatch('read_frame', { name: 'f' })).content[0] as { text: string }
+  expect(JSON.parse(text.text)).toEqual({ shapes: [], bindings: [], frameId: 'shape:f1' })
+})
+
+test('dispatch read_frame reports issues and strays together when both are present', async () => {
+  const issues = [{ kind: 'unbound-arrow', id: 'shape:arr', missing: ['end'] }]
+  const strays = [{ id: 'shape:b', type: 'geo', x: 9, y: 9, w: 3, h: 4, text: 'out' }]
+  const dispatch = createDispatcher(async () => ({
+    url: null,
+    width: 0,
+    height: 0,
+    shapes: [],
+    bindings: [],
+    frameId: 'shape:f1',
+    issues,
+    strays,
+  }))
+  const text = (await dispatch('read_frame', { name: 'f' })).content[0] as { text: string }
+  expect(JSON.parse(text.text)).toEqual({
+    shapes: [],
+    bindings: [],
+    frameId: 'shape:f1',
+    issues,
+    strays,
+  })
+})
+
+test('dispatch create_graph passes issues through untouched', async () => {
+  const result = {
+    ids: { A: 'shape:a' },
+    arrowIds: [],
+    issues: [{ kind: 'text-overflow', id: 'shape:a', grewBy: 12 }],
+  }
+  const dispatch = createDispatcher(async () => result)
+  expect(await dispatch('create_graph', { nodes: [], edges: [] })).toEqual({
+    content: [{ type: 'text', text: JSON.stringify(result) }],
+  })
+})
+
+// --- Batch layout ops + relative placement ---
+
+const BATCH_CALLS: [string, Record<string, unknown>][] = [
+  ['nudge_shapes', { ids: ['shape:a', 'shape:b'], dx: 0, dy: 50 }],
+  ['align_shapes', { ids: ['shape:a', 'shape:b'], edge: 'left' }],
+  ['distribute_shapes', { ids: ['shape:a', 'shape:b'], axis: 'horizontal' }],
+  ['stack_shapes', { ids: ['shape:a', 'shape:b'], axis: 'vertical', gap: 80 }],
+  ['pack_shapes', { ids: ['shape:a', 'shape:b'], gap: 32 }],
+  ['flip_shapes', { ids: ['shape:a', 'shape:b'], axis: 'horizontal' }],
+]
+
+for (const [tool, args] of BATCH_CALLS) {
+  test(`dispatch ${tool} → forwards args verbatim, returns the count as text`, async () => {
+    let seen: any
+    const result = { count: 2 }
+    const dispatch = createDispatcher(async (t, params) => {
+      seen = { tool: t, params }
+      return result
+    })
+    expect(await dispatch(tool, args)).toEqual({
+      content: [{ type: 'text', text: JSON.stringify(result) }],
+    })
+    expect(seen).toEqual({ tool, params: args })
+  })
+}
+
+test('dispatch stack_shapes without a gap → forwards without it, browser applies the default', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { count: 3 }
+  })
+  const args = { ids: ['shape:a', 'shape:b', 'shape:c'], axis: 'vertical' }
+  await dispatch('stack_shapes', args)
+  expect(seen).toEqual({ tool: 'stack_shapes', params: args })
+})
+
+test('dispatch place_shape → forwards id/relativeTo/side/gap/align, returns the page point', async () => {
+  let seen: any
+  const result = { id: 'shape:a', x: 380, y: 100 }
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return result
+  })
+  const args = { id: 'shape:a', relativeTo: 'shape:b', side: 'right', gap: 40, align: 'center' }
+  expect(await dispatch('place_shape', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify(result) }],
+  })
+  expect(seen).toEqual({ tool: 'place_shape', params: args })
+})
+
+test('dispatch place_shape with only the required args → gap/align left to the browser default', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:a', x: 0, y: 0 }
+  })
+  const args = { id: 'shape:a', relativeTo: 'shape:b', side: 'below' }
+  await dispatch('place_shape', args)
+  expect(seen).toEqual({ tool: 'place_shape', params: args })
+})
+
+test('every new tool is declared in TOOL_DEFS with a schema that fully describes a valid call', async () => {
+  // The point of splitting these into separate tools: `required` says what a correct call is, so
+  // a wrong one is rejected before it reaches the canvas instead of erroring at runtime.
+  const required = Object.fromEntries(
+    TOOL_DEFS.map((t: any) => [t.name, (t.inputSchema.required ?? []).sort()]),
+  )
+  expect(required.nudge_shapes).toEqual(['dx', 'dy', 'ids'])
+  expect(required.align_shapes).toEqual(['edge', 'ids'])
+  expect(required.distribute_shapes).toEqual(['axis', 'ids'])
+  expect(required.stack_shapes).toEqual(['axis', 'ids'])
+  expect(required.pack_shapes).toEqual(['ids'])
+  expect(required.flip_shapes).toEqual(['axis', 'ids'])
+  expect(required.place_shape).toEqual(['id', 'relativeTo', 'side'])
 })
