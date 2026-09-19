@@ -332,6 +332,11 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     const props: Record<string, unknown> = {}
     if (w !== undefined) props.w = w
     if (h !== undefined) props.h = h
+    // An explicit resize means the caller owns the size, so clear the growth tldraw added to fit
+    // a label — which is exactly what dragging a resize handle does (GeoShapeUtil.onResize sets
+    // growY: 0). Without this the shape ends up h + growY tall, so asking for 320 gives 430 and
+    // a text-overflow issue never clears no matter how much room you give it.
+    if ((w !== undefined || h !== undefined) && Object.hasOwn(shape.props, 'growY')) props.growY = 0
     if (color !== undefined) props.color = color
     if (fill !== undefined) props.fill = fill
     if (text !== undefined) {

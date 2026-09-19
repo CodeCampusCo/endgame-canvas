@@ -205,7 +205,7 @@ absent when there is nothing wrong, so its presence is itself the signal.
 
 | `kind` | What happened | The fix |
 |---|---|---|
-| `text-overflow` | The label did not fit, so tldraw grew the box by `grewBy` px. It is now taller than the layout assumed and may be touching whatever is below it. | Shorten the label, or `update_shape({id, w, h})` to give it room. A label that merely *wrapped* is **not** reported — that is acceptable output, not a defect. |
+| `text-overflow` | The label did not fit, so tldraw grew the box by `grewBy` px. It is now taller than the layout assumed and may be touching whatever is below it. | Shorten the label, or `update_shape({id, h})` to give it the room it asked for — an explicit resize hands the size back to you and clears the growth. A label that merely *wrapped* is **not** reported: that is acceptable output, not a defect. |
 | `overlap` | Two boxes share pixels — `id` and `with`. | Move one: `place_shape`, `nudge_shapes`, or `update_shape`. |
 | `unbound-arrow` | An arrow is bound at only one end (`missing` says which). It looks connected and comes adrift the moment that shape moves. | `delete_shape` it and redo with `create_arrow({fromId, toId})`. |
 | `clipped` | A child of the frame sits entirely outside it. It is still a child — so it is in the shape list and is **not** a stray — but a frame clips its children, so it renders nowhere: not on screen, not in the image, not in an export. | Move it back inside with `nudge_shapes` or `update_shape({id, x, y})`, or lift it out of the frame with `update_shape({id, parent: 'page'})` to make it visible where it is. |
@@ -213,8 +213,7 @@ absent when there is nothing wrong, so its presence is itself the signal.
 Each shape is reported once per kind, so a pile of boxes is one complaint rather than one per
 pair. Fix, then read again — anything hidden behind the first fix surfaces on the next pass.
 
-**`strays` is the fourth thing reported to you**, and it is not about the drawing but about the
-frame. tldraw drops a shape from a frame the moment it is dragged past the edge and never takes
+**`strays` is reported alongside them**, and it is not about the drawing but about the frame. tldraw drops a shape from a frame the moment it is dragged past the edge and never takes
 it back on its own — not when the frame is resized to cover it again, not when the shape is moved
 back inside. `read_frame` and `export_image` report those shapes as `strays`; the field is absent
 when there are none. They are missing from the image, the shape list, and any frame export, while

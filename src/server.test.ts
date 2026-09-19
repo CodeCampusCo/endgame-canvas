@@ -884,3 +884,15 @@ test('every new tool is declared in TOOL_DEFS with a schema that fully describes
   expect(required.flip_shapes).toEqual(['axis', 'ids'])
   expect(required.place_shape).toEqual(['id', 'relativeTo', 'side'])
 })
+
+test('every tool declared to the client has a handler — the three-place recipe, enforced', async () => {
+  // A TOOL_DEFS entry with no handler is advertised to the MCP client and then fails at call
+  // time with "unknown tool". Nothing else catches that.
+  const dispatch = createDispatcher(async () => ({}))
+  const unhandled: string[] = []
+  for (const { name } of TOOL_DEFS as { name: string }[]) {
+    const r = await dispatch(name, {})
+    if (r.isError && String((r.content[0] as any).text).startsWith('unknown tool')) unhandled.push(name)
+  }
+  expect(unhandled).toEqual([])
+})
