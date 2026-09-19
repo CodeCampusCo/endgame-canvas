@@ -871,8 +871,6 @@ test('dispatch place_shape with only the required args → gap/align left to the
 })
 
 test('every new tool is declared in TOOL_DEFS with a schema that fully describes a valid call', async () => {
-  // The point of splitting these into separate tools: `required` says what a correct call is, so
-  // a wrong one is rejected before it reaches the canvas instead of erroring at runtime.
   const required = Object.fromEntries(
     TOOL_DEFS.map((t: any) => [t.name, (t.inputSchema.required ?? []).sort()]),
   )
@@ -886,8 +884,6 @@ test('every new tool is declared in TOOL_DEFS with a schema that fully describes
 })
 
 test('every tool declared to the client has a handler — the three-place recipe, enforced', async () => {
-  // A TOOL_DEFS entry with no handler is advertised to the MCP client and then fails at call
-  // time with "unknown tool". Nothing else catches that.
   const dispatch = createDispatcher(async () => ({}))
   const unhandled: string[] = []
   for (const { name } of TOOL_DEFS as { name: string }[]) {
@@ -902,7 +898,6 @@ test('every tool declared to the client has a handler — the three-place recipe
 test('a missing required argument is refused before the canvas is touched', async () => {
   let called = false
   const dispatch = createDispatcher(async () => { called = true; return {} })
-  // place_shape without `side` used to fall through to the left branch and move the shape.
   const r = await dispatch('place_shape', { id: 'shape:a', relativeTo: 'shape:b' })
   expect(r.isError).toBe(true)
   expect((r.content[0] as any).text).toBe('place_shape: missing required argument side')
@@ -918,7 +913,6 @@ test('several missing required arguments are named together', async () => {
 test('a misspelled enum is refused, naming the values that would have worked', async () => {
   let called = false
   const dispatch = createDispatcher(async () => { called = true; return {} })
-  // 'frme' used to export the whole page and report success.
   const r = await dispatch('export_image', { target: 'frme', format: 'png', path: 'x.png' })
   expect(r.isError).toBe(true)
   expect((r.content[0] as any).text).toContain('target must be one of canvas, frame, selection')

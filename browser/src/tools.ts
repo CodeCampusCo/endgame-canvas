@@ -52,8 +52,7 @@ function shapeSnapshot(editor: Editor, s: TLShape) {
   }
 }
 
-// The check module's view of a shape: page bounds — which already include growY, since tldraw
-// reports a grown box at its grown height — plus the raw growY that says it was grown at all.
+// Page bounds already include growY; the raw growY says whether the box was grown at all.
 function checkShape(editor: Editor, s: TLShape): CheckShape {
   const b = editor.getShapePageBounds(s)
   return {
@@ -84,9 +83,7 @@ function straysOver(editor: Editor, frame: TLShape) {
   if (!fb) return []
   return editor
     .getCurrentPageShapes()
-    // hasAncestor, not parentId: a shape inside a frame inside this one is already part of the
-    // picture and part of the export. Calling it a stray would send the caller to reparent it,
-    // which would tear it out of the inner frame for nothing.
+    // hasAncestor, not parentId: a shape in a nested frame is already inside this one.
     .filter((s) => s.type !== 'frame' && !editor.hasAncestor(s, frame.id))
     .filter((s) => {
       const b = editor.getShapePageBounds(s)
@@ -97,8 +94,7 @@ function straysOver(editor: Editor, frame: TLShape) {
 
 function findFrame(editor: Editor, name: string) {
   const frames = getFrames(editor)
-  // A "shape:" prefix means "this is an id", but nothing stops a human naming a frame that way —
-  // and then every tool that takes a name would lose it. Fall back to the name.
+  // A frame can be *named* "shape:...", so fall back to a name match.
   return name.startsWith('shape:')
     ? (frames.find((s) => s.id === name) ?? frames.find((s) => s.props.name === name))
     : frames.find((s) => s.props.name === name)
@@ -108,9 +104,8 @@ function findFrame(editor: Editor, name: string) {
 // bound at both ends (start→fromShapeId, end→toShapeId) so moving either shape
 // drags the arrow with it.
 function bindArrow(editor: Editor, fromShapeId: TLShapeId, toShapeId: TLShapeId, text?: string, color?: string) {
-  // tldraw routes an arrow between two terminals; given one shape twice it produces a 0x0 shape
-  // that draws nothing and leaves the label floating, while both ends count as bound so no check
-  // can see it. Refuse instead.
+  // tldraw draws a self-arrow as a 0x0 shape: nothing on screen, and bound at both ends, so no
+  // check can see it.
   if (fromShapeId === toShapeId) throw new Error('an arrow needs two different shapes, got the same one twice: ' + fromShapeId)
   if (!editor.getShape(fromShapeId)) throw new Error('shape not found: ' + fromShapeId)
   if (!editor.getShape(toShapeId)) throw new Error('shape not found: ' + toShapeId)
@@ -163,10 +158,8 @@ function createGeoNode(editor: Editor, geo: string, x: number, y: number, text: 
   return id
 }
 
-// tldraw's Editor already implements every multi-shape move; these tools are the thin exposure
-// of them. Each takes explicit `ids` — there is no "ids or frame" alternative, because a schema
-// cannot express "exactly one of these two", which would leave the tool depending on the caller
-// to choose correctly. list_frames reports shapeIds for the "everything in this frame" case.
+// tldraw's own multi-shape moves. Targets are always explicit ids; list_frames reports a frame's
+// shapeIds for the "everything in this frame" case.
 const BATCH_OPS: Record<string, (editor: Editor, ids: TLShapeId[], p: any) => void> = {
   nudge_shapes: (e, ids, p) => e.nudgeShapes(ids, { x: p.dx, y: p.dy }),
   align_shapes: (e, ids, p) => e.alignShapes(ids, p.edge),
@@ -176,11 +169,9 @@ const BATCH_OPS: Record<string, (editor: Editor, ids: TLShapeId[], p: any) => vo
   flip_shapes: (e, ids, p) => e.flipShapes(ids, p.axis),
 }
 
-// align/distribute/stack/pack merge shapes joined by an arrow that is ITSELF in the id list
-// into one cluster, then return early when fewer than this many clusters remain. A connected
-// diagram collapses to one cluster, so handing them a frame's shapeIds — exactly what list_frames
-// offers — moves nothing while still reporting a count. Bound arrows follow their shapes anyway,
-// so drop them and arrange the shapes. flip_shapes does no clustering and takes ids as given.
+// These four merge shapes joined by an arrow that is itself in the id list into one cluster, then
+// return early below this many clusters — so a connected diagram would move nothing. flip_shapes
+// does no clustering.
 const CLUSTERING_MIN: Record<string, number> = {
   align_shapes: 2,
   distribute_shapes: 3,
@@ -188,10 +179,9 @@ const CLUSTERING_MIN: Record<string, number> = {
   pack_shapes: 2,
 }
 
-// nudgeShapes reads each shape without a null check, so one stale id would throw mid-batch.
-// Filter first, and refuse a call that would move nothing rather than report a silent success.
+// nudgeShapes reads each shape without a null check, so stale ids must not reach it.
 function existingIds(editor: Editor, ids: string[]): TLShapeId[] {
-  // Deduplicate: the same id twice would be counted twice and, for a move, applied twice.
+  // Deduplicate: a repeated id would be moved, and counted, twice.
   const found = [...new Set(ids ?? [])].filter((id) => editor.getShape(id as TLShapeId)) as TLShapeId[]
   if (found.length === 0) throw new Error('no shapes found for ids: ' + (ids ?? []).join(', '))
   return found
@@ -226,8 +216,7 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   if (tool === 'list_frames') {
     return getFrames(editor).map((s) => {
       const b = editor.getShapePageBounds(s)
-      // shapeIds so the batch tools can act on a frame's contents: they take explicit ids, and
-      // this is the cheap text-only way to get them — read_frame would cost a raster.
+      // shapeIds feeds the batch tools without the raster read_frame would cost.
       const childIds = editor.getSortedChildIdsForParent(s.id)
       return {
         id: s.id,
@@ -257,9 +246,8 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     const strays = straysOver(editor, frame)
     const issues = findIssues(children.map((s) => checkShape(editor, s)), bindings, editor.getShapePageBounds(frame))
     if (children.length === 0) return { url: null, width: 0, height: 0, shapes: [], bindings: [], frameId: frame.id, strays, issues }
-    // Every child can render to nothing — all of them clipped outside the frame — and toImage
-    // throws on a zero-area region. That is precisely when the issues matter most, so lose the
-    // picture rather than the whole payload.
+    // toImage throws on a zero-area region, which happens when every child is clipped away.
+    // Keep the payload; the issues explain the missing picture.
     let url: string | null = null
     let width = 0
     let height = 0
@@ -361,11 +349,6 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     const { id, x, y, w, h, text, color, fill, parent } = params
     const shape = editor.getShape(id)
     if (!shape) throw new Error('shape not found: ' + id)
-    // Deliberately no growY reset anywhere below, though an explicit resize looks like the moment
-    // for one. tldraw grows a box to fit a label and recomputes that only when the text changes,
-    // so clearing growY hands back an exact height while cropping the label out of sight — and
-    // disarms the text-overflow check for that shape for good, since nothing will ever set it
-    // again. A grown box therefore measures h + growY, and only a shorter label brings it down.
     const size: Record<string, unknown> = {}
     if (w !== undefined) size.w = w
     if (h !== undefined) size.h = h
@@ -383,10 +366,8 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       local = editor.getPointInParentSpace(shape, pagePoint)
     }
     editor.run(() => {
-      // Size first, in its own update: tldraw measures a new label against the height the shape
-      // had when the update arrived, so resizing and relabelling together leaves a leftover
-      // growY from the old height — a text-overflow the caller cannot clear, because the label
-      // already fits the size they asked for.
+      // Size first, separately: tldraw measures a label against the height the shape had when the
+      // update arrived.
       if (Object.keys(size).length > 0) editor.updateShape({ id, type: shape.type, props: size })
       editor.updateShape({
         id,
@@ -394,12 +375,10 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
         ...(local ? { x: local.x, y: local.y } : {}),
         props,
       })
-      // tldraw re-measures a label only when the text itself changes — and it compares for
-      // equality, so re-sending the same string does nothing either. A resize therefore leaves
-      // the old growth behind: narrow a box and the label is cropped while text-overflow still
-      // reports the shortfall measured at the old width. Write a marker into the text and take it
-      // straight back out, inside this same transaction so nothing intermediate is ever drawn,
-      // and the label ends up measured against the size that was actually asked for.
+      // tldraw re-measures a label only when the text changes, and compares for equality — so
+      // resending the same string is a no-op. Change it and change it back, in this transaction,
+      // to measure the label against the size just set. Never reset growY directly: that crops
+      // the label and leaves nothing to report it.
       if (shape.type === 'geo' && Object.keys(size).length > 0) {
         const label = text ?? editor.getShapeUtil(shape).getText(shape) ?? ''
         if (label !== '') {
@@ -424,8 +403,7 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   if (tool === 'delete_shape') {
     const { ids } = params
     const existing = [...new Set<string>(ids)].filter((id) => editor.getShape(id as TLShapeId)) as TLShapeId[]
-    // Count what actually left the page, not how many ids were handed in: deleting a frame takes
-    // its children with it, so the two numbers are rarely the same.
+    // Deleting a frame takes its children too, so count what left the page.
     const before = editor.getCurrentPageShapes().length
     editor.deleteShapes(existing)
     return { deleted: before - editor.getCurrentPageShapes().length }
@@ -450,9 +428,7 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     const { name } = params
     const id = PageRecordType.createId()
     editor.createPage({ id, name })
-    // createPage is a silent no-op once the board is at tldraw's page cap, which would otherwise
-    // hand back an id for a page that does not exist — and switch_page would then fail with
-    // "page not found" for something this tool just reported creating.
+    // createPage is a silent no-op at tldraw's page cap.
     if (!editor.getPage(id)) {
       throw new Error('page not created: the board is at tldraw\'s limit of ' + editor.options.maxPages + ' pages — delete one in the browser first')
     }
@@ -499,9 +475,8 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
   }
   if (tool === 'create_graph') {
     const { nodes, edges, layout = 'tree', frame, x = 100, y = 100 } = params
-    // Node keys index everything downstream — the positions map, the id map the caller gets back,
-    // and the issue check. A missing or repeated key silently collapses several nodes into one
-    // entry: they are all drawn, stacked on the same spot, and the check only ever sees the last.
+    // Keys index the positions map and the returned ids, so a repeat collapses several nodes into
+    // one entry: all drawn, stacked on one spot, only the last one tracked.
     const keys = new Set<string>()
     for (const node of nodes) {
       if (typeof node?.key !== 'string' || node.key === '') throw new Error('every node needs a key')
@@ -542,18 +517,15 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       }
 
       for (const edge of edges) {
-        // hasOwn, not `in`: 'toString' and friends are on every object's prototype and would
-        // sail past this check straight into a confusing shape-not-found from tldraw.
+        // hasOwn, not `in`: `in` walks the prototype chain.
         if (!Object.hasOwn(ids, edge.from)) throw new Error('unknown node key in edge: ' + edge.from)
         if (!Object.hasOwn(ids, edge.to)) throw new Error('unknown node key in edge: ' + edge.to)
         arrowIds.push(bindArrow(editor, ids[edge.from], ids[edge.to], edge.text, color))
       }
 
-      // The frame above was sized from the layout, which assumes every node is NODE_H tall. A
-      // node whose label did not fit is taller than that by the time it exists, and a frame
-      // clips its children — so it would hang out of the bottom of its own frame and simply not
-      // render. Re-fit to what was actually drawn. Measured from the frame's own origin so the
-      // frame never moves, which would drag every child along with it.
+      // The frame was sized from the layout, which assumes every node is NODE_H tall; a grown one
+      // would hang outside and be clipped. Measured from the frame's origin, since moving a frame
+      // moves its children.
       if (frameId) {
         const fb = editor.getShapePageBounds(frameId)!
         const drawn = [...Object.values(ids), ...arrowIds]
@@ -566,8 +538,7 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       }
     })
 
-    // Check what was just drawn: a label too long for its node grows the box (see checks.ts),
-    // and the caller should learn that without spending a read_frame round trip to find out.
+    // Report defects here so the caller does not need a read_frame round trip to find them.
     const issues = findIssues(Object.values(ids).map((id) => checkShape(editor, editor.getShape(id)!)))
     return { ids, arrowIds, ...(issues.length ? { issues } : {}) }
   }
@@ -587,14 +558,11 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     })
     return { nodeId, arrowId }
   }
-  // hasOwn, not `in`: `in` walks the prototype chain, so 'constructor', 'toString' and friends
-  // would match here and be called as if they were ops — returning a fake success instead of
-  // falling through to the unknown-tool throw at the bottom.
+  // hasOwn, not `in`: `in` walks the prototype chain, so 'toString' and friends would match and
+  // be called as ops.
   if (Object.hasOwn(BATCH_OPS, tool)) {
     let ids = existingIds(editor, params.ids)
-    // tldraw moves a frame's children along with the frame, so a list holding both — which is
-    // exactly what list_frames' `id` and `shapeIds` invite — would move every child twice and
-    // quietly stretch the diagram apart inside its own frame.
+    // tldraw moves a frame's children with the frame, so listing both would move them twice.
     const listed = ids
     ids = ids.filter((id) => !listed.some((other) => other !== id && editor.hasAncestor(id, other)))
     if (Object.hasOwn(CLUSTERING_MIN, tool)) {
@@ -602,13 +570,11 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       ids = ids.filter((id) => {
         const s = editor.getShape(id)!
         if (s.type !== 'arrow') return true
-        // Only a BOUND arrow does the clustering. One left loose — its endpoints deleted, or a
-        // human's stray stroke — is an ordinary shape to tldraw and lays out fine.
+        // Only a bound arrow clusters; a loose one lays out like any other shape.
         const bound = getArrowBindings(editor, s as Extract<TLShape, { type: 'arrow' }>)
         return !bound.start && !bound.end
       })
-      // Throw rather than let tldraw return early in silence: a no-op that reports a count is
-      // indistinguishable from work done, and the caller has no other way to find out.
+      // Throw rather than let tldraw return early in silence.
       if (ids.length < min) {
         throw new Error(tool + ' needs at least ' + min + ' shapes it can lay out — bound arrows follow their endpoints and are skipped — got ' + ids.length)
       }
@@ -622,9 +588,7 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     if (!shape) throw new Error('shape not found: ' + id)
     const anchor = editor.getShapePageBounds(relativeTo)
     if (!anchor) throw new Error('shape not found: ' + relativeTo)
-    // A bound arrow's position comes from its bindings, not its x/y — tldraw drags it straight
-    // back to the shapes it connects, so placing one reports a position it never reached. Say so
-    // instead. An arrow left loose (its target deleted) has no bindings and places fine.
+    // A bound arrow's position comes from its bindings, not its x/y; a loose one places fine.
     if (shape.type === 'arrow') {
       const bound = getArrowBindings(editor, shape as Extract<TLShape, { type: 'arrow' }>)
       if (bound.start || bound.end) {
@@ -632,13 +596,10 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       }
     }
     const b = editor.getShapePageBounds(shape)!
-    // The dispatcher validates this against the published enum; this is the backstop, because
-    // an unrecognised side would otherwise fall through to the left branch and move the shape
-    // somewhere nobody asked for.
+    // Backstop: an unrecognised side would otherwise fall through to the left branch.
     const vertical = side === 'above' || side === 'below'
     if (!vertical && side !== 'left' && side !== 'right') throw new Error('unknown side: ' + side)
-    // The gap is between the two bounding boxes, so the shape's near edge lands `gap` from the
-    // anchor's; on the other axis the two are lined up according to `align`.
+    // `gap` separates the two bounding boxes; `align` lines them up on the other axis.
     const lineUp = (start: number, extent: number, own: number) =>
       align === 'start' ? start : align === 'end' ? start + extent - own : start + (extent - own) / 2
     const x = vertical
@@ -651,10 +612,8 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
         ? anchor.y + anchor.h + gap
         : anchor.y - gap - b.h
       : lineUp(anchor.y, anchor.h, b.h)
-    // Move by the delta rather than writing the target into x/y: a shape's own origin is not
-    // its page-bounds top-left for arrows, rotated shapes or draw strokes, so assigning the
-    // target directly would land them somewhere other than the position this call reports.
-    // nudgeShapes also does the page-space to parent-local conversion for a frame's children.
+    // Move by delta: a shape's own origin is not its page-bounds top-left for arrows, rotated
+    // shapes or draw strokes. nudgeShapes also handles the parent-local conversion.
     editor.nudgeShapes([id], { x: x - b.x, y: y - b.y })
     return { id, x, y }
   }

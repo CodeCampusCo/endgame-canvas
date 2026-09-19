@@ -552,10 +552,8 @@ export const TOOL_DEFS = [
 
 const DEFS_BY_NAME = new Map(TOOL_DEFS.map((t) => [t.name, t]))
 
-// The MCP SDK hands tool arguments straight through without checking inputSchema, so a missing
-// required argument or a misspelled enum would reach the canvas, match nothing, and come back as
-// a success — indistinguishable from work done. The schema we publish is the only description of
-// a correct call, so it is the thing to enforce, once, for every tool.
+// The MCP SDK does not check inputSchema, so an unchecked call reaches the canvas and matches
+// nothing — a no-op reported as a success.
 function schemaError(name: string, args: unknown): string | null {
   const def = DEFS_BY_NAME.get(name)
   if (!def) return null
@@ -685,8 +683,7 @@ export function createDispatcher(call: CanvasCall) {
     },
     async export_image(args) {
       const { target, format, path, name } = args
-      // The one conditional requirement in the whole tool set, and the only one a JSON schema
-      // cannot state — so it is checked here rather than left to fail as a TypeError downstream.
+      // The one conditional requirement a JSON schema cannot state.
       if (target === 'frame' && !name) throw new Error('export_image: name is required when target is frame')
       const resolved = resolve(path)
       if (!resolved.startsWith(process.cwd() + '/')) {
@@ -702,8 +699,7 @@ export function createDispatcher(call: CanvasCall) {
   }
 
   return async (name: string, args: unknown): Promise<ToolResult> => {
-    // hasOwn, not a bare lookup: 'constructor', 'toString' and friends come off Object.prototype
-    // as callable and would be run as if they were handlers.
+    // hasOwn, not a bare lookup: Object.prototype members are callable and would run as handlers.
     if (!Object.hasOwn(handlers, name)) return { ...asText(`unknown tool: ${name}`), isError: true }
     const problem = schemaError(name, args)
     if (problem) return { ...asText(problem), isError: true }
