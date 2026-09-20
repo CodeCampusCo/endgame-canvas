@@ -31,7 +31,7 @@ lay out a graph in one call, and export the result to a file you can drop into a
 
 ## What it can do
 
-28 MCP tools over one canvas:
+29 MCP tools over one canvas:
 
 - **Read** — `read_canvas` (a raster the agent can read freehand off), `get_snapshot` (every
   shape with position + text), `read_frame` (a frame cropped to a raster **plus** its shapes,
@@ -42,13 +42,17 @@ lay out a graph in one call, and export the result to a file you can drop into a
   shapes), `create_note`.
 - **Frames** — `create_frame`, `list_frames` — a named frame is the shared reference unit
   ("what's in frame X?").
-- **Edit** — `update_shape` (move / resize / relabel / recolour), `delete_shape`.
+- **Edit** — `update_shape` (move / resize / relabel / recolour / text size), `delete_shape`.
 - **Arrange** — `place_shape` (put a shape beside another one, no coordinates), `nudge_shapes`,
   `align_shapes`, `distribute_shapes`, `stack_shapes`, `pack_shapes`, `flip_shapes` — each over a
   list of ids, each one undo step.
 - **Navigate** — `zoom_to_frame`, `select` — point the human's view and highlight shapes.
 - **Compose** — `create_graph` — any node-and-edge diagram (flowchart, org chart, dependency
   graph…), laid out tree or grid, with bound arrows, in one call — plus `create_connected`.
+- **Wireframe** — `create_screen` — a whole UI screen in one call from a tree of elements
+  (`input`, `select`, `button`, `checkbox`, `radio`, `image`, `divider`, text, and `column` /
+  `row` / `panel` containers), laid out at a fixed spacing and type scale inside its own frame.
+  It draws what is on a screen and where, not what it should look like.
 - **Pages** — `create_page`, `list_pages`, `switch_page`.
 - **Export** — `export_image` writes a PNG or SVG **to disk**, so diagrams land in your docs.
 - **Attribution** — `list_agents`; set `CANVAS_AGENT` and an agent's shapes take a distinct

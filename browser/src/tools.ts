@@ -1,5 +1,6 @@
-import { type Editor, type TLShape, type TLShapeId, type IndexKey, toRichText, createShapeId, getArrowBindings, getIndices, PageRecordType } from 'tldraw'
+import { type Editor, type TLShape, type TLShapeId, type IndexKey, toRichText, createShapeId, getArrowBindings, getIndices, PageRecordType, TEXT_PROPS, FONT_FAMILIES } from 'tldraw'
 import { graphPositions, NODE_W, NODE_H } from './graph'
+import { layoutScreen, SCREENS } from './screen'
 import { findIssues, type CheckShape } from './checks'
 
 // Real tldraw DefaultColorStyle enum values (verified in
@@ -260,12 +261,12 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     return { url, width, height, shapes: children.map((s) => shapeSnapshot(editor, s)), bindings, frameId: frame.id, strays, issues }
   }
   if (tool === 'create_shape') {
-    const { type, x, y, text } = params
+    const { type, x, y, text, size } = params
     const id = createShapeId()
     if (type === 'text') {
       editor.createShape({
         id, type: 'text', x, y,
-        props: { richText: toRichText(text ?? ''), font: 'sans', ...(color ? { color } : {}) },
+        props: { richText: toRichText(text ?? ''), font: 'sans', ...(size ? { size } : {}), ...(color ? { color } : {}) },
       })
     } else {
       editor.createShape({
@@ -282,6 +283,7 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
           verticalAlign: 'middle',
           font: 'sans',
           dash: 'solid',
+          ...(size ? { size } : {}),
           ...(color ? { color } : {}),
         },
       })
@@ -346,15 +348,16 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     return { id }
   }
   if (tool === 'update_shape') {
-    const { id, x, y, w, h, text, color, fill, parent } = params
+    const { id, x, y, w, h, text, color, fill, size, parent } = params
     const shape = editor.getShape(id)
     if (!shape) throw new Error('shape not found: ' + id)
-    const size: Record<string, unknown> = {}
-    if (w !== undefined) size.w = w
-    if (h !== undefined) size.h = h
+    const dims: Record<string, unknown> = {}
+    if (w !== undefined) dims.w = w
+    if (h !== undefined) dims.h = h
     const props: Record<string, unknown> = {}
     if (color !== undefined) props.color = color
     if (fill !== undefined) props.fill = fill
+    if (size !== undefined) props.size = size
     if (text !== undefined) {
       if (shape.type === 'arrow') props.text = text
       else props.richText = toRichText(text)
@@ -366,9 +369,9 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       local = editor.getPointInParentSpace(shape, pagePoint)
     }
     editor.run(() => {
-      // Size first, separately: tldraw measures a label against the height the shape had when the
-      // update arrived.
-      if (Object.keys(size).length > 0) editor.updateShape({ id, type: shape.type, props: size })
+      // Box dimensions first, separately: tldraw measures a label against the height the shape had
+      // when the update arrived.
+      if (Object.keys(dims).length > 0) editor.updateShape({ id, type: shape.type, props: dims })
       editor.updateShape({
         id,
         type: shape.type,
@@ -377,9 +380,9 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       })
       // tldraw re-measures a label only when the text changes, and compares for equality — so
       // resending the same string is a no-op. Change it and change it back, in this transaction,
-      // to measure the label against the size just set. Never reset growY directly: that crops
-      // the label and leaves nothing to report it.
-      if (shape.type === 'geo' && Object.keys(size).length > 0) {
+      // to measure the label against the box and text size just set. Never reset growY directly:
+      // that crops the label and leaves nothing to report it.
+      if (shape.type === 'geo' && (Object.keys(dims).length > 0 || size !== undefined)) {
         const label = text ?? editor.getShapeUtil(shape).getText(shape) ?? ''
         if (label !== '') {
           editor.updateShape({ id, type: shape.type, props: { richText: toRichText(label + '\u200B') } })
@@ -557,6 +560,72 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       arrowId = bindArrow(editor, fromId, nodeId, undefined, color)
     })
     return { nodeId, arrowId }
+  }
+  if (tool === 'create_screen') {
+    const { name, screen = 'phone', x = 100, y = 100, root } = params
+    const preset = SCREENS[screen]
+    if (!preset) throw new Error('unknown screen preset: ' + screen + ' — try ' + Object.keys(SCREENS).join(' or '))
+    // Real wrapping, measured the way tldraw measures its own text shapes, so a label that runs to
+    // two lines pushes what follows it down instead of landing on top of it.
+    const measure = (text: string, fontSize: number, maxWidth: number) =>
+      text === ''
+        ? 0
+        : editor.textMeasure.measureText(text, {
+            ...TEXT_PROPS,
+            fontFamily: FONT_FAMILIES.sans,
+            fontSize,
+            maxWidth,
+          }).h
+    const { draws, height } = layoutScreen(root, { width: preset.w, measure })
+
+    const ids: Record<string, TLShapeId[]> = {}
+    const made: TLShapeId[] = []
+    let frameId!: TLShapeId
+    editor.run(() => {
+      frameId = createShapeId()
+      // Sized to the content when it outgrows the preset: a frame clips its children, so a screen
+      // that scrolls in real life would otherwise lose its lower half without saying so.
+      editor.createShape({
+        id: frameId, type: 'frame', x, y,
+        props: { w: preset.w, h: Math.max(preset.h, height), name },
+      })
+      for (const d of draws) {
+        const id = createShapeId()
+        if (d.op === 'geo') {
+          editor.createShape({
+            id, type: 'geo', x: x + d.x, y: y + d.y,
+            props: {
+              geo: d.shape, w: d.w, h: d.h, size: 's', fill: d.fill, dash: 'solid', font: 'sans',
+              color: d.muted ? 'grey' : 'black',
+              // A box that holds its own label keeps it when the human drags the box.
+              ...(d.text
+                ? {
+                    richText: toRichText(d.text),
+                    align: d.align ?? 'middle',
+                    verticalAlign: 'middle',
+                    labelColor: d.labelMuted ? 'grey' : 'black',
+                  }
+                : {}),
+            },
+          })
+        } else {
+          // autoSize off is what makes the shape wrap at the width it was measured against.
+          editor.createShape({
+            id, type: 'text', x: x + d.x, y: y + d.y,
+            props: {
+              richText: toRichText(d.text), font: 'sans', size: d.size, w: d.w,
+              autoSize: false, textAlign: d.align, color: d.muted ? 'grey' : 'black',
+            },
+          })
+        }
+        made.push(id)
+        if (d.key) (ids[d.key] ??= []).push(id)
+      }
+      editor.reparentShapes(made, frameId)
+    })
+    // No findIssues here: a wireframe overlaps by construction — every label sits on the box it
+    // names — so the diagram checks would report the layout working as a defect.
+    return { frameId, ids, w: preset.w, h: Math.max(preset.h, height) }
   }
   // hasOwn, not `in`: `in` walks the prototype chain, so 'toString' and friends would match and
   // be called as ops.

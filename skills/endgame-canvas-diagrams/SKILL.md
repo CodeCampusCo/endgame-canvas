@@ -191,7 +191,7 @@ single undo step, so the human takes a whole rearrangement back with one ⌘Z.
 
 ### The emphasis you actually have
 
-`update_shape({id, color, fill})` is the whole toolkit — there is no border-style or line-weight
+`update_shape({id, color, fill, size})` is the whole toolkit — there is no border-style or line-weight
 control exposed. Verified on the dark canvas theme:
 
 | `fill` | Looks like | Use for |
@@ -206,8 +206,11 @@ control exposed. Verified on the dark canvas theme:
 `light-blue`, `yellow`, `orange`, `green`, `light-green`, `light-red`, `red`, `white`. There are
 no arbitrary hex colours and no brand palette; don't plan a design that needs one.
 
-Node names render in sans and arrow labels in small grey mono automatically. You don't set fonts,
-and you can't — pick good words instead.
+Node names render in sans and arrow labels in small grey mono automatically. Font family and
+weight are fixed — pick good words instead. Text `size` (`s`/`m`/`l`/`xl`) *is* settable on
+`create_shape` and `update_shape`, but on a geo box it drives the outline weight too (2 / 3.5 / 5 /
+10 px), so a bigger label arrives with a heavier border. In a diagram every node is a peer: leave
+it at `m`.
 
 ## Verify what you drew — don't trust the plan
 
@@ -270,9 +273,9 @@ page was already open, so check the switch succeeded first.
   that aren't aligned will happily run straight through a box in between and drop its label on
   top of that box's text. Tried and reverted. The curved default is better here; keep connected
   nodes close and the curve stays short.
-- **Dashed or weighted borders.** `dash` and `size` are not exposed by any tool, so treatments
-  that depend on a dashed outline (optional, async, trust boundary) can't be expressed. Use the
-  `fill` table above instead.
+- **Dashed borders.** `dash` is not exposed by any tool, so treatments that depend on a dashed
+  outline (optional, async, trust boundary) can't be expressed. Use the `fill` table above
+  instead. Border *weight* is reachable through `size`, but it drags the label size along with it.
 - **Brand colours or custom fonts.** The palette and the four font families are fixed and global;
   changing them would repaint the human's own strokes too.
 
@@ -282,8 +285,8 @@ page was already open, so check the switch succeeded first.
 |---|---|
 | Whole diagram in one call (layout + arrows + frame) | `create_graph` |
 | Extend an existing diagram by one node | `create_connected` |
-| A single non-graph shape | `create_shape` (type/x/y/text only) |
-| Recolour / move / resize / relabel | `update_shape` (x/y/w/h/text/color/fill) |
+| A single non-graph shape | `create_shape` (type/x/y/text/size) |
+| Recolour / move / resize / relabel | `update_shape` (x/y/w/h/text/color/fill/size) |
 | Put a shape beside another one | `place_shape` (side + gap, no coordinates) |
 | Move a whole group | `nudge_shapes` (dx/dy) |
 | Tidy a set of shapes | `align_shapes`, `distribute_shapes`, `stack_shapes`, `pack_shapes`, `flip_shapes` |

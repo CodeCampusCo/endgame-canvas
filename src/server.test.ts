@@ -416,6 +416,56 @@ test('dispatch update_shape with only id + color → forwards just those, return
   expect(seen).toEqual({ tool: 'update_shape', params: args })
 })
 
+test('dispatch update_shape forwards size on its own — restyling text without touching the box', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:a' }
+  })
+  const args = { id: 'shape:a', size: 's' }
+  expect(await dispatch('update_shape', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:a' }) }],
+  })
+  expect(seen).toEqual({ tool: 'update_shape', params: args })
+})
+
+test('dispatch create_screen → forwards the element tree, returns the frame and its ids', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { frameId: 'shape:f', ids: { submit: ['shape:a', 'shape:b'] }, w: 390, h: 844 }
+  })
+  const args = {
+    name: 'Login',
+    screen: 'phone',
+    root: {
+      kind: 'column',
+      children: [
+        { kind: 'heading', text: 'Sign in' },
+        { kind: 'input', label: 'Email', placeholder: 'you@example.com' },
+        { kind: 'button', text: 'Continue', key: 'submit' },
+      ],
+    },
+  }
+  const r = await dispatch('create_screen', args)
+  expect(seen).toEqual({ tool: 'create_screen', params: args })
+  expect(JSON.parse((r.content[0] as any).text)).toEqual({
+    frameId: 'shape:f',
+    ids: { submit: ['shape:a', 'shape:b'] },
+    w: 390,
+    h: 844,
+  })
+})
+
+test('create_screen needs a name and a root before anything is drawn', async () => {
+  let called = false
+  const dispatch = createDispatcher(async () => { called = true; return {} })
+  const r = await dispatch('create_screen', { screen: 'phone' })
+  expect(r.isError).toBe(true)
+  expect((r.content[0] as any).text).toBe('create_screen: missing required arguments name, root')
+  expect(called).toBe(false)
+})
+
 test('dispatch delete_shape → forwards ids, returns deleted count as text', async () => {
   let seen: any
   const dispatch = createDispatcher(async (tool, params) => {
@@ -458,6 +508,19 @@ test('dispatch select → forwards ids, returns honest selected count as text', 
 })
 
 // --- Family A: extended draw vocabulary (geo variants, line, highlight) ---
+
+test('dispatch create_shape forwards size — the only type hierarchy a screen mock has', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:a' }
+  })
+  const args = { type: 'text', x: 0, y: 0, text: 'Sign in', size: 'xl' }
+  expect(await dispatch('create_shape', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:a' }) }],
+  })
+  expect(seen).toEqual({ tool: 'create_shape', params: args })
+})
 
 test('dispatch create_shape with type: triangle → still forwards correctly', async () => {
   let seen: any
