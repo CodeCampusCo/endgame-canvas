@@ -487,6 +487,26 @@ export const TOOL_DEFS = [
     },
   },
   {
+    name: 'create_screen',
+    description:
+      'Draw a wireframe screen: one call lays out a whole screen inside its own frame from a tree of UI elements — inputs, buttons, checkboxes, rows, panels — at a fixed spacing and type scale, and returns the ids it made. A wireframe says what is on a screen and where; it carries no colour, corner radius, font or weight, so it cannot answer what a design should look like.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Frame name. One frame is one screen; draw alternatives as separate screens side by side and compare them by eye.' },
+        screen: { type: 'string', enum: ['phone', 'desktop'], description: "'phone' (390×844) by default, or 'desktop' (1440×900)." },
+        x: { type: 'number', description: 'Page position of the frame. Default 100.' },
+        y: { type: 'number', description: 'Page position of the frame. Default 100.' },
+        root: {
+          type: 'object',
+          description:
+            "The element tree; every node is {kind, ...}. Containers carry `children`: `column` stacks them full width, `row` sets them side by side (a child may claim `span` twelfths — children without one share what is left), `panel` is a column inside a visible box. Leaves: `heading`/`body`/`caption`/`link` take `text`; `input`/`select` take `label` and `placeholder`; `button` takes `text` and `primary` (false draws it as an outline); `checkbox`/`radio` take `text`; `image` takes `h`; `divider` takes nothing. Any node may take a `key`, and the ids it produced come back under that key. There are no coordinates and no sizes to pass: position, width, spacing and type scale are fixed, so every screen is drawn the same way.",
+        },
+      },
+      required: ['name', 'root'],
+    },
+  },
+  {
     name: 'create_graph',
     description:
       'Build a node-and-edge diagram in one step: lay out nodes (tree or grid), create each as a shape, and connect edges with bound arrows. Optionally wrap it all in a named frame. Works for any graph — flowchart, org chart, dependency graph, etc. Reports `issues` when a label outgrew its node or two nodes overlap. Node keys must be unique, and an edge from a node to itself is refused.',
@@ -681,6 +701,9 @@ export function createDispatcher(call: CanvasCall) {
     },
     async create_graph(args) {
       return asText(JSON.stringify(await call('create_graph', args)))
+    },
+    async create_screen(args) {
+      return asText(JSON.stringify(await call('create_screen', args), null, 2))
     },
     async create_connected(args) {
       return asText(JSON.stringify(await call('create_connected', args)))

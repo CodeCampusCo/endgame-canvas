@@ -1,5 +1,6 @@
-import { type Editor, type TLShape, type TLShapeId, type IndexKey, toRichText, createShapeId, getArrowBindings, getIndices, PageRecordType } from 'tldraw'
+import { type Editor, type TLShape, type TLShapeId, type IndexKey, toRichText, createShapeId, getArrowBindings, getIndices, PageRecordType, TEXT_PROPS, FONT_FAMILIES } from 'tldraw'
 import { graphPositions, NODE_W, NODE_H } from './graph'
+import { layoutScreen, SCREENS } from './screen'
 import { findIssues, type CheckShape } from './checks'
 
 // Real tldraw DefaultColorStyle enum values (verified in
@@ -559,6 +560,60 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       arrowId = bindArrow(editor, fromId, nodeId, undefined, color)
     })
     return { nodeId, arrowId }
+  }
+  if (tool === 'create_screen') {
+    const { name, screen = 'phone', x = 100, y = 100, root } = params
+    const preset = SCREENS[screen]
+    if (!preset) throw new Error('unknown screen preset: ' + screen + ' — try ' + Object.keys(SCREENS).join(' or '))
+    // Real wrapping, measured the way tldraw measures its own text shapes, so a label that runs to
+    // two lines pushes what follows it down instead of landing on top of it.
+    const measure = (text: string, fontSize: number, maxWidth: number) =>
+      text === ''
+        ? 0
+        : editor.textMeasure.measureText(text, {
+            ...TEXT_PROPS,
+            fontFamily: FONT_FAMILIES.sans,
+            fontSize,
+            maxWidth,
+          }).h
+    const { draws, height } = layoutScreen(root, { width: preset.w, measure })
+
+    const ids: Record<string, TLShapeId[]> = {}
+    const made: TLShapeId[] = []
+    let frameId!: TLShapeId
+    editor.run(() => {
+      frameId = createShapeId()
+      // Sized to the content when it outgrows the preset: a frame clips its children, so a screen
+      // that scrolls in real life would otherwise lose its lower half without saying so.
+      editor.createShape({
+        id: frameId, type: 'frame', x, y,
+        props: { w: preset.w, h: Math.max(preset.h, height), name },
+      })
+      for (const d of draws) {
+        const id = createShapeId()
+        if (d.op === 'geo') {
+          editor.createShape({
+            id, type: 'geo', x: x + d.x, y: y + d.y,
+            props: { geo: d.shape, w: d.w, h: d.h, size: 's', fill: d.fill, dash: 'solid', font: 'sans', color: d.muted ? 'grey' : 'black' },
+          })
+        } else {
+          // autoSize off is what makes the shape wrap at the width it was measured against.
+          editor.createShape({
+            id, type: 'text', x: x + d.x, y: y + d.y,
+            props: {
+              richText: toRichText(d.text), font: 'sans', size: d.size, w: d.w,
+              autoSize: false, textAlign: d.align, color: d.muted ? 'grey' : 'black',
+            },
+          })
+        }
+        made.push(id)
+        if (d.key) (ids[d.key] ??= []).push(id)
+      }
+      editor.reparentShapes(made, frameId)
+    })
+    // No findIssues here: a wireframe overlaps by construction — every label sits on the box it
+    // names — so the diagram checks would report the layout working as a defect.
+    return { frameId, ids, w: preset.w, h: Math.max(preset.h, height) }
   }
   // hasOwn, not `in`: `in` walks the prototype chain, so 'toString' and friends would match and
   // be called as ops.

@@ -429,6 +429,43 @@ test('dispatch update_shape forwards size on its own — restyling text without 
   expect(seen).toEqual({ tool: 'update_shape', params: args })
 })
 
+test('dispatch create_screen → forwards the element tree, returns the frame and its ids', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { frameId: 'shape:f', ids: { submit: ['shape:a', 'shape:b'] }, w: 390, h: 844 }
+  })
+  const args = {
+    name: 'Login',
+    screen: 'phone',
+    root: {
+      kind: 'column',
+      children: [
+        { kind: 'heading', text: 'Sign in' },
+        { kind: 'input', label: 'Email', placeholder: 'you@example.com' },
+        { kind: 'button', text: 'Continue', key: 'submit' },
+      ],
+    },
+  }
+  const r = await dispatch('create_screen', args)
+  expect(seen).toEqual({ tool: 'create_screen', params: args })
+  expect(JSON.parse((r.content[0] as any).text)).toEqual({
+    frameId: 'shape:f',
+    ids: { submit: ['shape:a', 'shape:b'] },
+    w: 390,
+    h: 844,
+  })
+})
+
+test('create_screen needs a name and a root before anything is drawn', async () => {
+  let called = false
+  const dispatch = createDispatcher(async () => { called = true; return {} })
+  const r = await dispatch('create_screen', { screen: 'phone' })
+  expect(r.isError).toBe(true)
+  expect((r.content[0] as any).text).toBe('create_screen: missing required arguments name, root')
+  expect(called).toBe(false)
+})
+
 test('dispatch delete_shape → forwards ids, returns deleted count as text', async () => {
   let seen: any
   const dispatch = createDispatcher(async (tool, params) => {
