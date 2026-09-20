@@ -17,8 +17,11 @@ const FIELD_H = 48
 const TICK = 28
 const CARET = 12
 const IMAGE_H = 180
-const FIELD_PAD = 12
 const LINE_H = 1.35
+// A box carries its own label, so these are tldraw's numbers, not ours: every box is drawn at
+// `size: 's'`, whose label renders at 18px inside 16px of padding per side.
+const LABEL_FS = 18
+const LABEL_PAD = 16
 
 const FONT = { heading: 36, body: 24, caption: 18, link: 18 } as const
 const TEXT_SIZE = { 36: 'l', 24: 'm', 18: 's' } as const
@@ -38,7 +41,12 @@ export type ScreenNode = {
 }
 
 export type Draw =
-  | { op: 'geo'; shape: string; x: number; y: number; w: number; h: number; fill: 'none' | 'solid'; muted?: boolean; key?: string }
+  | {
+      op: 'geo'; shape: string; x: number; y: number; w: number; h: number
+      fill: 'none' | 'solid'; muted?: boolean
+      text?: string; align?: 'start' | 'middle'; labelMuted?: boolean
+      key?: string
+    }
   | { op: 'text'; x: number; y: number; w: number; text: string; size: 's' | 'm' | 'l'; muted: boolean; align: 'start' | 'middle'; key?: string }
 
 const CONTAINERS = new Set(['column', 'row', 'panel'])
@@ -68,6 +76,12 @@ export function layoutScreen(
 ): { draws: Draw[]; height: number } {
   const draws: Draw[] = []
   const { measure } = opts
+
+  // What tldraw will make the box once its own label is measured: it grows a box whose label does
+  // not fit, and never shrinks one that is taller than its label.
+  function boxHeight(label: string, w: number): number {
+    return Math.max(FIELD_H, measure(label, LABEL_FS, w - LABEL_PAD * 2))
+  }
 
   function text(node: ScreenNode, x: number, y: number, w: number, fontSize: number, muted: boolean): number {
     const body = node.text ?? ''
@@ -123,27 +137,27 @@ export function layoutScreen(
         draws.push({ op: 'text', x, y: top, w, text: node.label, size: 's', muted: true, align: 'start', ...k })
         top += measure(node.label, FONT.caption, w) + LABEL_GAP
       }
-      draws.push({ op: 'geo', shape: 'rectangle', x, y: top, w, h: FIELD_H, fill: 'none', ...k })
       const inner = node.placeholder ?? node.text ?? ''
-      if (inner) {
-        const innerH = measure(inner, FONT.body, w - FIELD_PAD * 2)
-        draws.push({ op: 'text', x: x + FIELD_PAD, y: top + (FIELD_H - innerH) / 2, w: w - FIELD_PAD * 2, text: inner, size: 'm', muted: true, align: 'start', ...k })
-      }
+      const h = boxHeight(inner, w)
+      draws.push({
+        op: 'geo', shape: 'rectangle', x, y: top, w, h, fill: 'none',
+        text: inner, align: 'start', labelMuted: true, ...k,
+      })
       if (kind === 'select') {
-        draws.push({ op: 'geo', shape: 'arrow-down', x: x + w - FIELD_PAD - CARET, y: top + (FIELD_H - CARET) / 2, w: CARET, h: CARET, fill: 'solid', ...k })
+        draws.push({ op: 'geo', shape: 'arrow-down', x: x + w - LABEL_PAD - CARET, y: top + (h - CARET) / 2, w: CARET, h: CARET, fill: 'solid', ...k })
       }
-      return top + FIELD_H - y
+      return top + h - y
     }
 
     if (kind === 'button') {
-      draws.push({
-        op: 'geo', shape: 'rectangle', x, y, w, h: FIELD_H,
-        fill: node.primary === false ? 'none' : 'solid', ...k,
-      })
       const body = node.text ?? ''
-      const h = measure(body, FONT.body, w)
-      draws.push({ op: 'text', x, y: y + (FIELD_H - h) / 2, w, text: body, size: 'm', muted: false, align: 'middle', ...k })
-      return FIELD_H
+      const h = boxHeight(body, w)
+      draws.push({
+        op: 'geo', shape: 'rectangle', x, y, w, h,
+        fill: node.primary === false ? 'none' : 'solid',
+        text: body, align: 'middle', ...k,
+      })
+      return h
     }
 
     if (kind === 'checkbox' || kind === 'radio') {

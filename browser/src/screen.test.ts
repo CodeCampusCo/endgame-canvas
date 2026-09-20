@@ -83,35 +83,40 @@ test('wrapped text pushes the next element down — the reason heights are measu
   expect(buttonY(long)).toBeGreaterThan(buttonY(short))
 })
 
-test('an input draws label, box and placeholder, with the placeholder inside the box', () => {
+test('an input is a caption above a box whose own label is the placeholder, left-aligned and muted', () => {
   const { draws } = run({
     kind: 'column',
     children: [{ kind: 'input', label: 'Email', placeholder: 'you@example.com' }],
   })
   const box = geos(draws)[0]
-  const [label, placeholder] = texts(draws)
+  const [label] = texts(draws)
   expect(label).toMatchObject({ text: 'Email', size: 's', muted: true, y: 24 })
   expect(box.y).toBeGreaterThan(label.y)
-  expect(placeholder.x).toBe(box.x + 12)
-  expect(placeholder.y).toBeGreaterThan(box.y)
-  expect(placeholder.y).toBeLessThan(box.y + box.h)
+  expect(box).toMatchObject({ text: 'you@example.com', align: 'start', labelMuted: true })
 })
 
 test('a select is an input plus a caret inside its right edge', () => {
   const { draws } = run({ kind: 'column', children: [{ kind: 'select', label: 'Country', text: 'Thailand' }] })
   const caret = geos(draws).find((g) => g.shape === 'arrow-down')!
   const box = geos(draws).find((g) => g.shape === 'rectangle')!
-  expect(caret.x + caret.w).toBe(box.x + box.w - 12)
+  expect(caret.x + caret.w).toBe(box.x + box.w - 16)
   expect(caret.y).toBeGreaterThan(box.y)
 })
 
-test('a button is an empty box with its label centred over it — no box ever carries text', () => {
+test('a button is one box carrying its own centred label, so dragging it keeps the words', () => {
   const { draws } = run({ kind: 'column', children: [{ kind: 'button', text: 'Sign in' }] })
-  const box = geos(draws)[0]
-  const label = texts(draws)[0]
-  expect(label).toMatchObject({ text: 'Sign in', align: 'middle', x: box.x, w: box.w })
-  expect(label.y).toBeGreaterThan(box.y)
-  expect(draws.every((d) => d.op !== 'geo' || !('text' in d))).toBe(true)
+  expect(draws).toHaveLength(1)
+  expect(geos(draws)[0]).toMatchObject({ text: 'Sign in', align: 'middle', h: 48 })
+})
+
+test('a label too long for its box grows the box, and the next element clears the grown height', () => {
+  const { draws } = run({
+    kind: 'column',
+    children: [{ kind: 'button', text: 'x'.repeat(200) }, { kind: 'button', text: 'below' }],
+  })
+  const [grown, below] = geos(draws)
+  expect(grown.h).toBeGreaterThan(48)
+  expect(below.y).toBe(24 + grown.h + 16)
 })
 
 test('a primary button is filled and a secondary one is not', () => {
@@ -151,7 +156,7 @@ test('keys ride along on the shape the caller named, so ids come back addressabl
     children: [{ kind: 'button', text: 'Sign in', key: 'submit' }, { kind: 'body', text: 'or', key: 'hint' }],
   })
   // A key names the element, not one shape of it: the button's box and its label both answer to it.
-  expect(draws.filter((d) => d.key === 'submit').map((d) => d.op)).toEqual(['geo', 'text'])
+  expect(draws.filter((d) => d.key === 'submit').map((d) => d.op)).toEqual(['geo'])
   expect(draws.filter((d) => d.key === 'hint').map((d) => d.op)).toEqual(['text'])
 })
 

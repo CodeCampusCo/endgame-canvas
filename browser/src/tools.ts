@@ -594,7 +594,19 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
         if (d.op === 'geo') {
           editor.createShape({
             id, type: 'geo', x: x + d.x, y: y + d.y,
-            props: { geo: d.shape, w: d.w, h: d.h, size: 's', fill: d.fill, dash: 'solid', font: 'sans', color: d.muted ? 'grey' : 'black' },
+            props: {
+              geo: d.shape, w: d.w, h: d.h, size: 's', fill: d.fill, dash: 'solid', font: 'sans',
+              color: d.muted ? 'grey' : 'black',
+              // A box that holds its own label keeps it when the human drags the box.
+              ...(d.text
+                ? {
+                    richText: toRichText(d.text),
+                    align: d.align ?? 'middle',
+                    verticalAlign: 'middle',
+                    labelColor: d.labelMuted ? 'grey' : 'black',
+                  }
+                : {}),
+            },
           })
         } else {
           // autoSize off is what makes the shape wrap at the width it was measured against.
