@@ -416,6 +416,19 @@ test('dispatch update_shape with only id + color → forwards just those, return
   expect(seen).toEqual({ tool: 'update_shape', params: args })
 })
 
+test('dispatch update_shape forwards size on its own — restyling text without touching the box', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:a' }
+  })
+  const args = { id: 'shape:a', size: 's' }
+  expect(await dispatch('update_shape', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:a' }) }],
+  })
+  expect(seen).toEqual({ tool: 'update_shape', params: args })
+})
+
 test('dispatch delete_shape → forwards ids, returns deleted count as text', async () => {
   let seen: any
   const dispatch = createDispatcher(async (tool, params) => {
@@ -458,6 +471,19 @@ test('dispatch select → forwards ids, returns honest selected count as text', 
 })
 
 // --- Family A: extended draw vocabulary (geo variants, line, highlight) ---
+
+test('dispatch create_shape forwards size — the only type hierarchy a screen mock has', async () => {
+  let seen: any
+  const dispatch = createDispatcher(async (tool, params) => {
+    seen = { tool, params }
+    return { id: 'shape:a' }
+  })
+  const args = { type: 'text', x: 0, y: 0, text: 'Sign in', size: 'xl' }
+  expect(await dispatch('create_shape', args)).toEqual({
+    content: [{ type: 'text', text: JSON.stringify({ id: 'shape:a' }) }],
+  })
+  expect(seen).toEqual({ tool: 'create_shape', params: args })
+})
 
 test('dispatch create_shape with type: triangle → still forwards correctly', async () => {
   let seen: any

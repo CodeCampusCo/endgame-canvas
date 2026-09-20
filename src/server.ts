@@ -157,6 +157,12 @@ export const TOOL_DEFS = [
         x: { type: 'number' },
         y: { type: 'number' },
         text: { type: 'string' },
+        size: {
+          type: 'string',
+          enum: ['s', 'm', 'l', 'xl'],
+          description:
+            "Text size — 'm' by default. The only type-hierarchy control there is: font family and weight cannot be set at all.",
+        },
       },
       required: ['type', 'x', 'y'],
     },
@@ -274,6 +280,12 @@ export const TOOL_DEFS = [
         text: { type: 'string' },
         color: { type: 'string' },
         fill: { type: 'string' },
+        size: {
+          type: 'string',
+          enum: ['s', 'm', 'l', 'xl'],
+          description:
+            "Text size — 'm' by default. The only type-hierarchy control there is: font family and weight cannot be set at all.",
+        },
         parent: {
           type: 'string',
           description:

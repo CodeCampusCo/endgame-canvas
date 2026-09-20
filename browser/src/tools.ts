@@ -260,12 +260,12 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     return { url, width, height, shapes: children.map((s) => shapeSnapshot(editor, s)), bindings, frameId: frame.id, strays, issues }
   }
   if (tool === 'create_shape') {
-    const { type, x, y, text } = params
+    const { type, x, y, text, size } = params
     const id = createShapeId()
     if (type === 'text') {
       editor.createShape({
         id, type: 'text', x, y,
-        props: { richText: toRichText(text ?? ''), font: 'sans', ...(color ? { color } : {}) },
+        props: { richText: toRichText(text ?? ''), font: 'sans', ...(size ? { size } : {}), ...(color ? { color } : {}) },
       })
     } else {
       editor.createShape({
@@ -282,6 +282,7 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
           verticalAlign: 'middle',
           font: 'sans',
           dash: 'solid',
+          ...(size ? { size } : {}),
           ...(color ? { color } : {}),
         },
       })
@@ -346,15 +347,16 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
     return { id }
   }
   if (tool === 'update_shape') {
-    const { id, x, y, w, h, text, color, fill, parent } = params
+    const { id, x, y, w, h, text, color, fill, size, parent } = params
     const shape = editor.getShape(id)
     if (!shape) throw new Error('shape not found: ' + id)
-    const size: Record<string, unknown> = {}
-    if (w !== undefined) size.w = w
-    if (h !== undefined) size.h = h
+    const dims: Record<string, unknown> = {}
+    if (w !== undefined) dims.w = w
+    if (h !== undefined) dims.h = h
     const props: Record<string, unknown> = {}
     if (color !== undefined) props.color = color
     if (fill !== undefined) props.fill = fill
+    if (size !== undefined) props.size = size
     if (text !== undefined) {
       if (shape.type === 'arrow') props.text = text
       else props.richText = toRichText(text)
@@ -366,9 +368,9 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       local = editor.getPointInParentSpace(shape, pagePoint)
     }
     editor.run(() => {
-      // Size first, separately: tldraw measures a label against the height the shape had when the
-      // update arrived.
-      if (Object.keys(size).length > 0) editor.updateShape({ id, type: shape.type, props: size })
+      // Box dimensions first, separately: tldraw measures a label against the height the shape had
+      // when the update arrived.
+      if (Object.keys(dims).length > 0) editor.updateShape({ id, type: shape.type, props: dims })
       editor.updateShape({
         id,
         type: shape.type,
@@ -377,9 +379,9 @@ export async function runTool(editor: Editor, tool: string, params: any, agent?:
       })
       // tldraw re-measures a label only when the text changes, and compares for equality — so
       // resending the same string is a no-op. Change it and change it back, in this transaction,
-      // to measure the label against the size just set. Never reset growY directly: that crops
-      // the label and leaves nothing to report it.
-      if (shape.type === 'geo' && Object.keys(size).length > 0) {
+      // to measure the label against the box and text size just set. Never reset growY directly:
+      // that crops the label and leaves nothing to report it.
+      if (shape.type === 'geo' && (Object.keys(dims).length > 0 || size !== undefined)) {
         const label = text ?? editor.getShapeUtil(shape).getText(shape) ?? ''
         if (label !== '') {
           editor.updateShape({ id, type: shape.type, props: { richText: toRichText(label + '\u200B') } })
