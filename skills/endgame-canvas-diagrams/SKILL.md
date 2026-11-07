@@ -206,6 +206,32 @@ control exposed. Verified on the dark canvas theme:
 `light-blue`, `yellow`, `orange`, `green`, `light-green`, `light-red`, `red`, `white`. There are
 no arbitrary hex colours and no brand palette; don't plan a design that needs one.
 
+### Status maps — the one place colour *is* the category
+
+A work-tracking map (tickets, tasks, PRs) is the exception to "one accent": there, the status
+of each item is the point, so colour every node by it. Colour by **who holds the ball**, not by
+how urgent it looks. `create_graph` nodes don't take a colour, so draw first, then
+`update_shape` each node:
+
+| State | Marker | `color` | `fill` |
+|---|---|---|---|
+| Needs attention: the user must act | 🔴 | `red` | `solid` |
+| Blocked on QA / testing | 🟧 | `orange` | `solid` |
+| In progress, to do, or waiting on someone else | 🟨 | `yellow` | `solid` |
+| Done (only Done is green) | 🟢 | `green` | `solid` |
+| Canceled | ✖️ | `grey` | `none` (outline only) |
+| Pure theme/group label (not itself an item) | (none) | `blue` | `solid` |
+
+- A parent (an epic, a story with children) stays 🟨 until every child on the map is 🟢.
+- Never grey-fill an open item: grey fill reads as Canceled.
+- `solid` is a muted tint on the dark theme, so 🟧 and 🟨 sit close together. The marker
+  carries the state, not the tint alone: put it and a short status on the node's first line
+  (`KEY-123 · 🟧 Blocked: waits QA`), and add a `create_note` legend beside the map that matches
+  the table.
+- A recurring map (e.g. one per sprint): at the start of a new period, propose removing items
+  finished in the previous period and parents left with no open child. Keep anything still
+  blocked, and wait for the user's ok before deleting.
+
 Node names render in sans and arrow labels in small grey mono automatically. Font family and
 weight are fixed — pick good words instead. Text `size` (`s`/`m`/`l`/`xl`) *is* settable on
 `create_shape` and `update_shape`, but on a geo box it drives the outline weight too (2 / 3.5 / 5 /
